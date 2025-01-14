@@ -1,0 +1,160 @@
+---
+title: "DeepDream - Subject 2 Physiological Analysis"
+author:    |
+    | Colin Ayres  
+    | c.ayres@student.uw.edu.pl
+date: "January 2025"
+output: html_document
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages and Load Data
+
+```{r}
+# Load necessary libraries
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(zoo)) # For linear interpolation of pupil sizes when eyes closed
+
+# Set working directory
+mds_dir <- here::here()
+
+# Import data
+data <- read.csv("2_DeviceData.csv", sep=";")
+```
+
+## Interpolate Negative Pupil Values
+
+While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
+
+```{r}
+# Interpolate negative values for both columns
+data_interpolated <- data %>%
+  # Replace negative values with NA
+  mutate(
+    LeftEyePupilSize = ifelse(LeftEyePupilSize < 0, NA, LeftEyePupilSize),
+    RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize)
+  ) %>%
+  # Linearly interpolate missing (NA) values
+  mutate(
+    LeftEyePupilSize = zoo::na.approx(LeftEyePupilSize, na.rm = FALSE),
+    RightEyePupilSize = zoo::na.approx(RightEyePupilSize, na.rm = FALSE)
+  ) %>%
+  # Fill any remaining NAs at the very start or very beginning of the dataset
+  mutate(
+    LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE, fromLast = TRUE),
+    LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE),
+    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE, fromLast = TRUE),
+    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE)
+  )
+
+# Uncomment to visually check first 190 data points to make sure interpolation is correct 
+# head(data$LeftEyePupilSize, 190)
+# head(data_interpolated$LeftEyePupilSize, 190)
+```
+
+## Plotting Pupil Size
+
+I plot pupil size against time, using the phase of the experiment as background for the chart.
+
+
+```{r, echo=FALSE}
+# Plot of LeftEyePupilSize for Subject 2, Interpolated Negative Values
+ggplot(data_interpolated, aes(x = ExperimentSecond, y = LeftEyePupilSize)) +
+  # Add background rectangles for phases
+  geom_rect(aes(xmin = ExperimentSecond, xmax = lead(ExperimentSecond, default = max(ExperimentSecond)),
+                ymin = -Inf, ymax = Inf, fill = Phase),
+            color = NA, alpha = 0.3) +
+  # Add black line for pupil size
+  geom_line(color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Subject 2 Left Pupil Size During DayDream Experiment",
+    x = "Time (seconds)",
+    y = "Left Pupil Size",
+    fill = "Phase"
+  ) +
+  # Adjust fill colors for phases
+  scale_fill_manual(values = c(
+    "BeforeRecording" = "blue",
+    "Countdown" = "lightgreen",
+    "Recording" = "pink",
+    "SegmentFinished" = "yellow",
+    "UIFeedback" = "purple",
+    "Video" = "orange"
+  )) +
+  theme(legend.position = "bottom")
+
+# Plot of RightEyePupilSize for Subject 2, Interpolated Negative Values
+ggplot(data_interpolated, aes(x = ExperimentSecond, y = RightEyePupilSize)) +
+  # Add background rectangles for phases
+  geom_rect(aes(xmin = ExperimentSecond, xmax = lead(ExperimentSecond, default = max(ExperimentSecond)),
+                ymin = -Inf, ymax = Inf, fill = Phase),
+            color = NA, alpha = 0.3) +
+  # Add black line for pupil size
+  geom_line(color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Subject 2 Right Pupil Size During DayDream Experiment",
+    x = "Time (seconds)",
+    y = "Right Pupil Size",
+    fill = "Phase"
+  ) +
+  # Adjust fill colors for phases
+  scale_fill_manual(values = c(
+    "BeforeRecording" = "blue",
+    "Countdown" = "lightgreen",
+    "Recording" = "pink",
+    "SegmentFinished" = "yellow",
+    "UIFeedback" = "purple",
+    "Video" = "orange"
+  )) +
+  theme(legend.position = "bottom")
+
+# Reshape the data to long format for both pupil sizes
+data_long <- data_interpolated %>%
+  select(ExperimentSecond, Phase, LeftEyePupilSize, RightEyePupilSize) %>%
+  pivot_longer(
+    cols = c(LeftEyePupilSize, RightEyePupilSize),
+    names_to = "Eye",
+    values_to = "PupilSize"
+  )
+
+# Plot both LeftEyePupilSize and RightEyePupilSize on the same chart
+ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
+  # Add background rectangles for phases
+  geom_rect(aes(xmin = ExperimentSecond, 
+                xmax = lead(ExperimentSecond, default = max(ExperimentSecond)),
+                ymin = -Inf, ymax = Inf, fill = Phase),
+            inherit.aes = FALSE, color = NA, alpha = 0.3) +
+  # Add lines for pupil sizes
+  geom_line(linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Subject 2 Pupil Sizes During DayDream Experiment",
+    x = "Time (seconds)",
+    y = "Pupil Size",
+    fill = "Phase",
+    color = "Eye"
+  ) +
+  # Adjust fill colors for phases
+  scale_fill_manual(values = c(
+    "BeforeRecording" = "blue",
+    "Countdown" = "lightgreen",
+    "Recording" = "pink",
+    "SegmentFinished" = "yellow",
+    "UIFeedback" = "purple",
+    "Video" = "orange"
+  )) +
+  # Set line colors for Left and Right pupil sizes
+  scale_color_manual(values = c(
+    "LeftEyePupilSize" =  adjustcolor( "red", alpha.f = 0.5),
+    "RightEyePupilSize" =  adjustcolor( "black", alpha.f = 0.5)
+  )) +
+  theme(legend.position = "bottom")
+```
