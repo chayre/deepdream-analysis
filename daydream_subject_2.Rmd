@@ -15,11 +15,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Import Packages and Load Data
 
 ```{r}
-# Load necessary libraries
+# Load necessary packages
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(here))
 suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(zoo)) # For linear interpolation of pupil sizes when eyes closed
+suppressPackageStartupMessages(library(zoo))
 
 # Set working directory
 mds_dir <- here::here()
