@@ -174,52 +174,40 @@ data_interpolated$Phase[data_interpolated$Phase == "Countdown"] <- "BeforeRecord
 # Define a function to create a single plot for a given subset of data
 create_pupil_plot <- function(data, title) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
-    geom_rect(
-      aes(xmin = ExperimentSecond - ExperimentSecond[1], 
-          xmax = lead(ExperimentSecond - ExperimentSecond[1], default = max(ExperimentSecond - ExperimentSecond[1])), 
-          ymin = 2, ymax = 7, fill = Phase),
-      color = NA, alpha = 0.3
-    ) +
     geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.1) +
-    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.1) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.01) +
+    geom_line(aes(y = Luminosity * 14, color = "Luminosity")) + 
+    scale_y_continuous(
+      name = "Pupil Size (mm)",
+      sec.axis = sec_axis(~ . / 14, name = "Luminosity")
+    ) +
     theme_minimal() +
     labs(
       title = title,
       x = "Time (seconds)",
       y = "Pupil Size (mm)",
-      fill = "Phase",
-      color = "Pupil"
+      color = "Legend"
     ) +
-    scale_fill_manual(values = c(
-      "BeforeRecording" = "lightblue",
-      "Countdown" = "black",
-      "Recording" = "pink",
-      "SegmentFinished" = "yellow",
-      "UIFeedback" = "purple",
-      "Video" = "orange"
-    )) +
     scale_color_manual(
-      values = c("Left Pupil Size" = "red", "Right Pupil Size" = "black")) +
-    guides(
-      fill = guide_legend(order = 1),
-      color = guide_legend(order = 2)
-    )
-     # guide = guide_legend(nrow = 1))  # Arrange legend into 2 rows)
+      values = c("Left Pupil Size" = "red", "Right Pupil Size" = "black", "Luminosity" = adjustcolor( "green", alpha.f = 0.5)))
 }
 
 # Create individual plots for the four conditions
 plot1 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong"), "Normal Mono")
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono")
 plot2 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong"), "Normal Stereo")
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo")
 plot3 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong"), "Hallucination Mono")
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono")
 plot4 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong"), "Hallucination Stereo")
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo")
+
+lumtest <- data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video")
 
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
