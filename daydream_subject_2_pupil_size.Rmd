@@ -20,13 +20,18 @@ suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(here))
 suppressPackageStartupMessages(library(ggplot2))
 suppressPackageStartupMessages(library(zoo))
+suppressPackageStartupMessages(library(patchwork))
 
 # Set working directory
 mds_dir <- here::here()
 
 # Import data
 data <- read.csv("2_DeviceData.csv", sep=";")
+
+table(data$VideoName)
+table(data$VideoMode)
 ```
+
 
 ## Interpolate Negative Pupil Values
 
@@ -157,4 +162,67 @@ ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
     "RightEyePupilSize" =  adjustcolor( "black", alpha.f = 0.5)
   )) +
   theme(legend.position = "bottom")
+```
+
+## Plotting Pupil Size by Video Mode (Normal/Hallucination) and Visual Type (Monoscopic/Sterescopic)
+
+```{r}
+# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
+data_interpolated$Phase[data_interpolated$Phase == "Countdown"] <- "BeforeRecording"
+
+
+# Define a function to create a single plot for a given subset of data
+create_pupil_plot <- function(data, title) {
+  ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
+    geom_rect(
+      aes(xmin = ExperimentSecond - ExperimentSecond[1], 
+          xmax = lead(ExperimentSecond - ExperimentSecond[1], default = max(ExperimentSecond - ExperimentSecond[1])), 
+          ymin = 2, ymax = 7, fill = Phase),
+      color = NA, alpha = 0.3
+    ) +
+    suppressMessages(geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.1)) +
+    suppressMessages(geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.1)) +
+    theme_minimal() +
+    labs(
+      title = title,
+      x = "Time (seconds)",
+      y = "Pupil Size (mm)",
+      fill = "Phase",
+      color = "Pupil"
+    ) +
+    scale_fill_manual(values = c(
+      "BeforeRecording" = "lightblue",
+      "Countdown" = "black",
+      "Recording" = "pink",
+      "SegmentFinished" = "yellow",
+      "UIFeedback" = "purple",
+      "Video" = "orange"
+    )) +
+    scale_color_manual(
+      values = c("Left Pupil Size" = "red", "Right Pupil Size" = "black")) +
+    guides(
+      fill = guide_legend(order = 1),
+      color = guide_legend(order = 2)
+    )
+     # guide = guide_legend(nrow = 1))  # Arrange legend into 2 rows)
+}
+
+# Create individual plots for the four conditions
+plot1 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong"), "Normal Mono")
+plot2 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong"), "Normal Stereo")
+plot3 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong"), "Hallucination Mono")
+plot4 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong"), "Hallucination Stereo")
+
+# Combine all plots into a 2x2 layout and display
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") # Collect the legends into one
+print(p)
 ```
