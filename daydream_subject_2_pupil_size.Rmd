@@ -27,9 +27,6 @@ mds_dir <- here::here()
 
 # Import data
 data <- read.csv("2_DeviceData.csv", sep=";")
-
-table(data$VideoName)
-table(data$VideoMode)
 ```
 
 
@@ -168,18 +165,21 @@ ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
 
 ```{r warning=FALSE, message=FALSE}
 # Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
-data_interpolated$Phase[data_interpolated$Phase == "Countdown"] <- "BeforeRecording"
-
+# Also getting rid of values for which Luminosity = 0
+data_interpolated <- data_interpolated %>%
+  mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
+  filter(Luminosity != 0)
 
 # Define a function to create a single plot for a given subset of data
-create_pupil_plot <- function(data, title) {
+create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
     geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
     geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
-    geom_line(aes(y = Luminosity * 14, color = "Luminosity")) + 
+    geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
     scale_y_continuous(
       name = "Pupil Size (mm)",
-      sec.axis = sec_axis(~ . / 14, name = "Luminosity")
+      limits = y_limits,
+      sec.axis = sec_axis(~ . / luminosity_factor, name = "Luminosity")
     ) +
     theme_minimal() +
     labs(
@@ -189,28 +189,37 @@ create_pupil_plot <- function(data, title) {
       color = "Legend"
     ) +
     scale_color_manual(
-      values = c("Left Pupil Size" = "red", "Right Pupil Size" = "black", "Luminosity" = adjustcolor( "green", alpha.f = 0.5)))
+      values = c(
+        "Left Pupil Size" = "red",
+        "Right Pupil Size" = "black",
+        "Luminosity" = adjustcolor("green", alpha.f = 0.5)
+      ),
+      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity") # Correct legend order
+    )
 }
+
+# Define common y-axis limits
+common_y_limits <- c(0, 6)  # Adjust based on your data
+luminosity_factor <- 14     # Scaling factor for Luminosity
 
 # Create individual plots for the four conditions
 plot1 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono")
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
 plot2 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo")
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
 plot3 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono")
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
 plot4 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo")
-
-lumtest <- data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video")
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
 
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
-  plot_layout(guides = "collect") # Collect the legends into one
+  plot_layout(guides = "collect") + # Collect the legends into one
+  plot_annotation(title = "Subject 2 Pupil Size During DayDream Video") # Add a supertitle
+
 print(p)
 ```
