@@ -174,8 +174,8 @@ data_interpolated$Phase[data_interpolated$Phase == "Countdown"] <- "BeforeRecord
 # Define a function to create a single plot for a given subset of data
 create_pupil_plot <- function(data, title) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
-    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.1) +
-    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.01) +
+    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
     geom_line(aes(y = Luminosity * 14, color = "Luminosity")) + 
     scale_y_continuous(
       name = "Pupil Size (mm)",
