@@ -14,13 +14,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Import Packages and Load Data
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 # Load necessary packages
-suppressPackageStartupMessages(library(tidyverse))
-suppressPackageStartupMessages(library(here))
-suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(zoo))
-suppressPackageStartupMessages(library(patchwork))
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(zoo)
+library(patchwork)
 
 # Set working directory
 mds_dir <- here::here()
@@ -166,7 +166,7 @@ ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
 
 ## Plotting Pupil Size by Video Mode (Normal/Hallucination) and Visual Type (Monoscopic/Sterescopic)
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 # Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
 data_interpolated$Phase[data_interpolated$Phase == "Countdown"] <- "BeforeRecording"
 
@@ -180,8 +180,8 @@ create_pupil_plot <- function(data, title) {
           ymin = 2, ymax = 7, fill = Phase),
       color = NA, alpha = 0.3
     ) +
-    suppressMessages(geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.1)) +
-    suppressMessages(geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.1)) +
+    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.1) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.1) +
     theme_minimal() +
     labs(
       title = title,
