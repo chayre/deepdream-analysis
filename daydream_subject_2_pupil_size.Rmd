@@ -29,31 +29,55 @@ mds_dir <- here::here()
 data <- read.csv("2_DeviceData.csv", sep=";")
 ```
 
+## Splitting Vectors into Directional Components
+```{r}
+# Splitting CombinedEyeDirection column into directional vectors
+values <- gsub("[()]", "", data$CombinedEyeDirection) %>%
+  strsplit(",") %>%
+  lapply(as.numeric)
+data$CombinedEyeDirectionX <- sapply(values, `[`, 1)
+data$CombinedEyeDirectionY <- sapply(values, `[`, 2)
+data$CombinedEyeDirectionZ <- sapply(values, `[`, 3)
+```
 
-## Interpolate Negative Pupil Values
+
+## Interpolate Values During Blinking
 
 While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
 
 ```{r}
-# Interpolate negative values for both columns
+# Interpolate blinking values
 data_interpolated <- data %>%
   # Replace negative values with NA
   mutate(
     LeftEyePupilSize = ifelse(LeftEyePupilSize < 0, NA, LeftEyePupilSize),
-    RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize)
+    RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize),
+    CombinedEyeDirectionX = ifelse(CombinedEyeDirectionX < -0.98, NA, CombinedEyeDirectionX),
+    CombinedEyeDirectionY = ifelse(CombinedEyeDirectionY < -0.98, NA, CombinedEyeDirectionY),
+    CombinedEyeDirectionZ = ifelse(CombinedEyeDirectionZ < -0.98, NA, CombinedEyeDirectionZ)
   ) %>%
   # Linearly interpolate missing (NA) values
   mutate(
     LeftEyePupilSize = zoo::na.approx(LeftEyePupilSize, na.rm = FALSE),
-    RightEyePupilSize = zoo::na.approx(RightEyePupilSize, na.rm = FALSE)
+    RightEyePupilSize = zoo::na.approx(RightEyePupilSize, na.rm = FALSE),
+    CombinedEyeDirectionX = zoo::na.approx(CombinedEyeDirectionX, na.rm = FALSE),
+    CombinedEyeDirectionY = zoo::na.approx(CombinedEyeDirectionY, na.rm = FALSE),
+    CombinedEyeDirectionZ = zoo::na.approx(CombinedEyeDirectionZ, na.rm = FALSE)
+
   ) %>%
   # Fill any remaining NAs at the very start or very beginning of the dataset
   mutate(
     LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE, fromLast = TRUE),
     LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE),
     RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE, fromLast = TRUE),
-    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE)
-  )
+    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE),
+    CombinedEyeDirectionX = zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionX = zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE),
+    CombinedEyeDirectionY = zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionY = zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE),
+    CombinedEyeDirectionZ = zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionZ = zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE)
+    )
 
 # Uncomment to visually check first 190 data points to make sure interpolation is correct 
 # head(data$LeftEyePupilSize, 190)
@@ -170,11 +194,11 @@ data_interpolated <- data_interpolated %>%
   mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
   filter(Luminosity != 0)
 
-# Define a function to create a single plot for a given subset of data
+# Define a function to create a single pupil/luminosity plot
 create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
-    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
-    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.05) +
+    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
     scale_y_continuous(
       name = "Pupil Size (mm)",
@@ -192,14 +216,14 @@ create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
       values = c(
         "Left Pupil Size" = "red",
         "Right Pupil Size" = "black",
-        "Luminosity" = adjustcolor("green", alpha.f = 0.5)
+        "Luminosity" = adjustcolor("green", alpha.f = 0.75)
       ),
-      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity") # Correct legend order
+      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity")
     )
 }
 
 # Define common y-axis limits
-common_y_limits <- c(0, 6)  # Adjust based on your data
+common_y_limits <- c(1, 6)  # Adjust based on your data
 luminosity_factor <- 14     # Scaling factor for Luminosity
 
 # Create individual plots for the four conditions
@@ -219,7 +243,82 @@ plot4 <- create_pupil_plot(
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
   plot_layout(guides = "collect") + # Collect the legends into one
-  plot_annotation(title = "Subject 2 Pupil Size During DayDream Video") # Add a supertitle
+  plot_annotation(title = "Subject 2 Pupil Size and Luminosity During DayDream Video") # Add a supertitle
 
 print(p)
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
+```
+
+## Plotting Gaze Shifts Alongside Pupil Diameter
+
+```{r warning=FALSE, message=FALSE}
+
+# Define a function to create a single plot for a given subset of data
+create_pupil_plot <- function(data, title, y_limits, direction_factor) {
+  ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
+    geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_smooth(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component"), se = FALSE, method = "loess", span = 0.012) +
+    geom_smooth(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component"), se = FALSE, method = "loess", span = 0.012) +
+    #geom_smooth(aes(y = CombinedEyeDirectionZ, color = "Gaze Z Component"), se = FALSE, method = "lm", span = 0.005) +
+    #geom_line(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component")) +
+    #geom_line(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component")) +
+    #geom_line(aes(y = CombinedEyeDirectionZ * direction_factor, color = "Gaze Z Component")) +
+    scale_y_continuous(
+      name = "Pupil Size (mm)",
+      limits = y_limits,
+      sec.axis = sec_axis(~ . / direction_factor, name = "Gaze Direction")
+    ) +
+    theme_minimal() +
+    labs(
+      title = title,
+      x = "Time (seconds)",
+      y = "Pupil Size (mm)",
+      color = "Legend"
+    ) +
+    scale_color_manual(
+      values = c(
+        "Left Pupil Size" = "red",
+        "Right Pupil Size" = "black",
+        "Gaze X Component" = adjustcolor("blue", alpha.f = 0.75),
+        "Gaze Y Component" = adjustcolor("orange", alpha.f = 0.75)
+        #"Gaze Z Component" = adjustcolor("yellow", alpha.f = 1)
+      ),
+      breaks = c("Left Pupil Size", "Right Pupil Size", "Gaze X Component", "Gaze Y Component")
+    )
+}
+
+# Define common y-axis limits
+common_y_limits <- c(-3, 4)  # Adjust based on your data
+direction_factor <- 5     # Scaling factor for Luminosity
+
+# Create individual plots for the four conditions
+plot1 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono", common_y_limits, direction_factor)
+plot2 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo", common_y_limits, direction_factor)
+plot3 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono", common_y_limits, direction_factor)
+plot4 <- create_pupil_plot(
+  data_interpolated %>% 
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo", common_y_limits, direction_factor)
+
+# Combine all plots into a 2x2 layout and display
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") + # Collect the legends into one
+  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video") # Add a supertitle
+
+print(p)
+
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
+
 ```
