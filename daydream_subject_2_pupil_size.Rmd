@@ -255,9 +255,35 @@ print(plot4)
 ## Plotting Gaze Shifts Alongside Pupil Diameter
 
 ```{r warning=FALSE, message=FALSE}
+# Function to find stable gaze regions
+find_stable_gaze_regions <- function(data, x_tolerance, duration_threshold) {
+  data %>%
+    mutate(
+      IsStableX = abs(CombinedEyeDirectionX - lag(CombinedEyeDirectionX, default = CombinedEyeDirectionX[1])) <= x_tolerance,
+      IsStableY = abs(CombinedEyeDirectionY - lag(CombinedEyeDirectionY, default = CombinedEyeDirectionY[1])) <= x_tolerance,
+      IsStable = IsStableX & IsStableY
+    ) %>%
+    mutate(
+      StableRun = cumsum(!IsStable)  # Group stable segments
+    ) %>%
+    group_by(StableRun) %>%
+    mutate(
+      Duration = n(),
+      StartTime = min(ExperimentSecond),
+      EndTime = max(ExperimentSecond)
+    ) %>%
+    ungroup() %>%
+    filter(IsStable & Duration >= duration_threshold) %>%
+    select(StartTime, EndTime) %>%
+    distinct()
+}
 
 # Define a function to create a single plot for a given subset of data
-create_pupil_plot <- function(data, title, y_limits, direction_factor) {
+create_pupil_plot <- function(data, title, y_limits, direction_factor, x_tolerance, duration_threshold) {
+  
+   # Call find_stable_gaze_regions inside the plot function
+  stable_regions <- find_stable_gaze_regions(data, x_tolerance, duration_threshold)
+  
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
     geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
@@ -289,32 +315,48 @@ create_pupil_plot <- function(data, title, y_limits, direction_factor) {
       ),
       breaks = c("Left Pupil Size", "Right Pupil Size", "Gaze X Component", "Gaze Y Component")
     )
+  # Highlight stable gaze regions
+  if (nrow(stable_regions) > 0) {
+    for (i in 1:nrow(stable_regions)) {
+      p <- p +
+        geom_rect(
+          aes(
+            xmin = stable_regions$StartTime[i] - data$ExperimentSecond[1],
+            xmax = stable_regions$EndTime[i] - data$ExperimentSecond[1],
+            ymin = -Inf,
+            ymax = Inf
+          ),
+          fill = "yellow", alpha = 0.2, inherit.aes = FALSE)
+    }
+  }
+  return(p)
 }
 
-# Define common y-axis limits
-common_y_limits <- c(-3, 4)  # Adjust based on your data
+common_y_limits <- c(-3, 4)  # Adjust based on pupil y-axis
 direction_factor <- 5     # Scaling factor for Luminosity
+x_tolerance <- 0.2           # Gaze difference tolerance
+duration_threshold <- 20     # Threshold for gaze stability duration
 
 # Create individual plots for the four conditions
 plot1 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono", common_y_limits, direction_factor)
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold)
 plot2 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo", common_y_limits, direction_factor)
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold)
 plot3 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono", common_y_limits, direction_factor)
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold)
 plot4 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo", common_y_limits, direction_factor)
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold)
 
 # Combine all plots into a 2x2 layout and display
-p <- (plot1 + plot2) / (plot3 + plot4) +
-  plot_layout(guides = "collect") + # Collect the legends into one
-  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video") # Add a supertitle
+#p <- (plot1 + plot2) / (plot3 + plot4) +
+#  plot_layout(guides = "collect") + # Collect the legends into one
+#  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video") # Add a #supertitle
 
-print(p)
+#print(p)
 
 print(plot1)
 print(plot2)
