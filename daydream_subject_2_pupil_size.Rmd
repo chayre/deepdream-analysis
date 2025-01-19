@@ -255,44 +255,68 @@ print(plot4)
 ## Plotting Gaze Shifts Alongside Pupil Diameter
 
 ```{r warning=FALSE, message=FALSE}
-# Function to find stable gaze regions
-find_stable_gaze_regions <- function(data, x_tolerance, duration_threshold) {
-  data %>%
-    mutate(
-      IsStableX = abs(CombinedEyeDirectionX - lag(CombinedEyeDirectionX, default = CombinedEyeDirectionX[1])) <= x_tolerance,
-      IsStableY = abs(CombinedEyeDirectionY - lag(CombinedEyeDirectionY, default = CombinedEyeDirectionY[1])) <= x_tolerance,
-      IsStable = IsStableX & IsStableY
-    ) %>%
-    mutate(
-      StableRun = cumsum(!IsStable)  # Group stable segments
-    ) %>%
-    group_by(StableRun) %>%
-    mutate(
-      Duration = n(),
-      StartTime = min(ExperimentSecond),
-      EndTime = max(ExperimentSecond)
-    ) %>%
-    ungroup() %>%
-    filter(IsStable & Duration >= duration_threshold) %>%
-    select(StartTime, EndTime) %>%
-    distinct()
+find_stable_gaze_regions <- function(data, threshold, duration, cooldown) {
+  stable_regions <- data.frame(StartTime = numeric(), EndTime = numeric())
+  in_region <- FALSE
+  start_time <- NA
+  last_end_time <- -Inf  # Ensure cooldown logic works
+
+  for (i in 1:nrow(data)) {
+    if (in_region) {
+      # Check if the gaze is still stable
+      if (abs(data$CombinedEyeDirectionX[i] - data$CombinedEyeDirectionX[start_time]) <= threshold &&
+          abs(data$CombinedEyeDirectionY[i] - data$CombinedEyeDirectionY[start_time]) <= threshold) {
+        if ((data$ExperimentSecond[i] - data$ExperimentSecond[start_time]) >= duration) {
+          end_time <- i
+          in_region <- FALSE
+          stable_regions <- rbind(
+            stable_regions,
+            data.frame(
+              StartTime = data$ExperimentSecond[start_time],
+              EndTime = data$ExperimentSecond[end_time]
+            )
+          )
+          last_end_time <- data$ExperimentSecond[end_time] + cooldown
+        }
+      } else {
+        # Exit region if gaze is no longer stable
+        in_region <- FALSE
+      }
+    } else {
+      # Start new stable region if cooldown period has passed
+      if (data$ExperimentSecond[i] > last_end_time &&
+          abs(data$CombinedEyeDirectionX[i] - mean(data$CombinedEyeDirectionX[i:min(nrow(data), i + duration - 1)])) <= threshold &&
+          abs(data$CombinedEyeDirectionY[i] - mean(data$CombinedEyeDirectionY[i:min(nrow(data), i + duration - 1)])) <= threshold) {
+        start_time <- i
+        in_region <- TRUE
+      }
+    }
+  }
+
+  return(stable_regions)
 }
 
-# Define a function to create a single plot for a given subset of data
-create_pupil_plot <- function(data, title, y_limits, direction_factor, x_tolerance, duration_threshold) {
-  
-   # Call find_stable_gaze_regions inside the plot function
-  stable_regions <- find_stable_gaze_regions(data, x_tolerance, duration_threshold)
+# Update the plotting function
+create_pupil_plot <- function(data, title, y_limits, direction_factor, threshold, duration, cooldown) {
+  stable_regions <- find_stable_gaze_regions(data, threshold, duration, cooldown)
   
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
     geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component"), se = FALSE, method = "loess", span = 0.012) +
-    #geom_smooth(aes(y = CombinedEyeDirectionZ, color = "Gaze Z Component"), se = FALSE, method = "lm", span = 0.005) +
-    #geom_line(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component")) +
-    #geom_line(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component")) +
-    #geom_line(aes(y = CombinedEyeDirectionZ * direction_factor, color = "Gaze Z Component")) +
+    geom_rect(
+      data = stable_regions,
+      aes(
+        xmin = StartTime - data$ExperimentSecond[1],
+        xmax = EndTime - data$ExperimentSecond[1],
+        ymin = y_limits[1],
+        ymax = y_limits[2]
+      ),
+      inherit.aes = FALSE,
+      fill = "gray",
+      alpha = 0.3
+    ) +
     scale_y_continuous(
       name = "Pupil Size (mm)",
       limits = y_limits,
@@ -311,56 +335,50 @@ create_pupil_plot <- function(data, title, y_limits, direction_factor, x_toleran
         "Right Pupil Size" = "black",
         "Gaze X Component" = adjustcolor("blue", alpha.f = 0.75),
         "Gaze Y Component" = adjustcolor("orange", alpha.f = 0.75)
-        #"Gaze Z Component" = adjustcolor("yellow", alpha.f = 1)
-      ),
-      breaks = c("Left Pupil Size", "Right Pupil Size", "Gaze X Component", "Gaze Y Component")
+      )
     )
-  # Highlight stable gaze regions
-  if (nrow(stable_regions) > 0) {
-    for (i in 1:nrow(stable_regions)) {
-      p <- p +
-        geom_rect(
-          aes(
-            xmin = stable_regions$StartTime[i] - data$ExperimentSecond[1],
-            xmax = stable_regions$EndTime[i] - data$ExperimentSecond[1],
-            ymin = -Inf,
-            ymax = Inf
-          ),
-          fill = "yellow", alpha = 0.2, inherit.aes = FALSE)
-    }
-  }
-  return(p)
 }
 
-common_y_limits <- c(-3, 4)  # Adjust based on pupil y-axis
-direction_factor <- 5     # Scaling factor for Luminosity
-x_tolerance <- 0.2           # Gaze difference tolerance
-duration_threshold <- 20     # Threshold for gaze stability duration
+
+# Define parameters
+common_y_limits <- c(-3, 4)  # Adjust based on data
+direction_factor <- 5        # Scaling factor for gaze direction
+x_tolerance <- 0.3           # Gaze difference tolerance (adjust as needed)
+duration_threshold <- 3     # Minimum number of points for stability (adjust as needed)
+cooldown = 2               # Minimum number of points before another rectangle can be drawn (adjust as needed)
 
 # Create individual plots for the four conditions
 plot1 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Normal Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold)
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"),
+  "Normal Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold, cooldown
+)
+
 plot2 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Normal Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold)
+    filter(data_interpolated$VideoMode == "Normal", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"),
+  "Normal Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold, cooldown
+)
+
 plot3 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"), "Hallucination Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold)
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Mono_HighLayer_Strong", data_interpolated$Phase == "Video"),
+  "Hallucination Mono", common_y_limits, direction_factor, x_tolerance, duration_threshold, cooldown
+)
+
 plot4 <- create_pupil_plot(
   data_interpolated %>% 
-    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"), "Hallucination Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold)
+    filter(data_interpolated$VideoMode == "Hallucinations", data_interpolated$VideoName == "Main_Stereo_HighLayerStrong", data_interpolated$Phase == "Video"),
+  "Hallucination Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold, cooldown
+)
 
-# Combine all plots into a 2x2 layout and display
+# Combine all plots into a 2x2 layout
 #p <- (plot1 + plot2) / (plot3 + plot4) +
-#  plot_layout(guides = "collect") + # Collect the legends into one
-#  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video") # Add a #supertitle
+#  plot_layout(guides = "collect") + 
+#  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video; Stable Gaze #Regions  Highlighted")
 
 #print(p)
 
 print(plot1)
-print(plot2)
-print(plot3)
-print(plot4)
 
 ```
