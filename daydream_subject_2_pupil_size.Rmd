@@ -255,11 +255,12 @@ print(plot4)
 ## Plotting Gaze Shifts Alongside Pupil Diameter
 
 ```{r warning=FALSE, message=FALSE}
+# Function to find where gaze is relatively stable
 find_stable_gaze_regions <- function(data, threshold, duration, cooldown) {
   stable_regions <- data.frame(StartTime = numeric(), EndTime = numeric())
   in_region <- FALSE
   start_time <- NA
-  last_end_time <- -Inf  # Ensure cooldown logic works
+  last_end_time <- -Inf 
 
   for (i in 1:nrow(data)) {
     if (in_region) {
@@ -296,7 +297,7 @@ find_stable_gaze_regions <- function(data, threshold, duration, cooldown) {
   return(stable_regions)
 }
 
-# Update the plotting function
+# Plotting function
 create_pupil_plot <- function(data, title, y_limits, direction_factor, threshold, duration, cooldown) {
   stable_regions <- find_stable_gaze_regions(data, threshold, duration, cooldown)
   
@@ -314,8 +315,8 @@ create_pupil_plot <- function(data, title, y_limits, direction_factor, threshold
         ymax = y_limits[2]
       ),
       inherit.aes = FALSE,
-      fill = "gray",
-      alpha = 0.3
+      fill = "green",
+      alpha = 0.45
     ) +
     scale_y_continuous(
       name = "Pupil Size (mm)",
@@ -339,13 +340,12 @@ create_pupil_plot <- function(data, title, y_limits, direction_factor, threshold
     )
 }
 
-
 # Define parameters
 common_y_limits <- c(-3, 4)  # Adjust based on data
 direction_factor <- 5        # Scaling factor for gaze direction
-x_tolerance <- 0.3           # Gaze difference tolerance (adjust as needed)
-duration_threshold <- 3     # Minimum number of points for stability (adjust as needed)
-cooldown = 2               # Minimum number of points before another rectangle can be drawn (adjust as needed)
+x_tolerance <- 0.25          # Gaze difference tolerance (adjust as needed)
+duration_threshold <- 2     # Minimum number of points for stability (adjust as needed)
+cooldown = 1               # Minimum number of points before another rectangle can be drawn (adjust as needed)
 
 # Create individual plots for the four conditions
 plot1 <- create_pupil_plot(
@@ -372,13 +372,22 @@ plot4 <- create_pupil_plot(
   "Hallucination Stereo", common_y_limits, direction_factor, x_tolerance, duration_threshold, cooldown
 )
 
-# Combine all plots into a 2x2 layout
-#p <- (plot1 + plot2) / (plot3 + plot4) +
-#  plot_layout(guides = "collect") + 
-#  plot_annotation(title = "Subject 2 Pupil Size with Gaze Directions During DayDream Video; Stable Gaze #Regions  Highlighted")
+#Combine all plots into a 2x2 layout
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") + 
+  plot_annotation(title = paste(
+    "Subject 2 Pupil Size with Gaze Directions During DayDream Video;",
+    "Stable Gaze Regions Highlighted; Tolerance =", x_tolerance,
+    ", Duration =", duration_threshold,
+    "sec)"),
+    theme = theme(plot.title = element_text(size = 9, hjust = 0.5)) 
+    )
 
-#print(p)
+print(p)
 
 print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
 
 ```
