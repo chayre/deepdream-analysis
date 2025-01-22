@@ -304,8 +304,10 @@ create_pupil_plot <- function(data, title, y_limits, direction_factor, threshold
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
     geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
-    geom_smooth(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component"), se = FALSE, method = "loess", span = 0.012) +
-    geom_smooth(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component"), se = FALSE, method = "loess", span = 0.012) +
+    #geom_smooth(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component"), se = FALSE, method = "loess", span = 0.012) +
+    #geom_smooth(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component"), se = FALSE, method = "loess", span = 0.012) +
+    geom_line(aes(y = CombinedEyeDirectionX * direction_factor, color = "Gaze X Component")) +
+    geom_line(aes(y = CombinedEyeDirectionY * direction_factor, color = "Gaze Y Component")) +
     geom_rect(
       data = stable_regions,
       aes(
