@@ -30,6 +30,7 @@ data <- read.csv("2_DeviceData.csv", sep=";")
 ```
 
 ## Splitting Vectors into Directional Components
+
 ```{r}
 # Splitting CombinedEyeDirection column into directional vectors
 values <- gsub("[()]", "", data$CombinedEyeDirection) %>%
@@ -39,7 +40,6 @@ data$CombinedEyeDirectionX <- sapply(values, `[`, 1)
 data$CombinedEyeDirectionY <- sapply(values, `[`, 2)
 data$CombinedEyeDirectionZ <- sapply(values, `[`, 3)
 ```
-
 
 ## Interpolate Values During Blinking
 
@@ -79,6 +79,12 @@ data_interpolated <- data %>%
     CombinedEyeDirectionZ = zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE)
     )
 
+# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
+# Also getting rid of values for which Luminosity = 0
+data_interpolated <- data_interpolated %>%
+  mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
+  filter(Luminosity != 0)
+
 # Uncomment to visually check first 190 data points to make sure interpolation is correct 
 # head(data$LeftEyePupilSize, 190)
 # head(data_interpolated$LeftEyePupilSize, 190)
@@ -87,7 +93,6 @@ data_interpolated <- data %>%
 ## Plotting Pupil Size
 
 I plot pupil size against time, using the phase of the experiment as background for the chart.
-
 
 ```{r, echo=FALSE}
 # Plot of LeftEyePupilSize for Subject 2, Interpolated Negative Values
@@ -188,12 +193,6 @@ ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
 ## Plotting Pupil Size by Video Mode (Normal/Hallucination) and Visual Type (Monoscopic/Sterescopic)
 
 ```{r warning=FALSE, message=FALSE}
-# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
-# Also getting rid of values for which Luminosity = 0
-data_interpolated <- data_interpolated %>%
-  mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
-  filter(Luminosity != 0)
-
 # Define a function to create a single pupil/luminosity plot
 create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
@@ -250,6 +249,132 @@ print(plot1)
 print(plot2)
 print(plot3)
 print(plot4)
+```
+
+## Normalizing Pupil Size by Luminosity
+
+```{r warning=FALSE, message=FALSE}
+
+# Fit a linear regression model for pupil size based on luminosity; take average of left and right pupil sizes
+fit_model <- function(data) {
+  lm((LeftEyePupilSize + RightEyePupilSize) / 2 ~ Luminosity, data)
+}
+
+# Add normalized pupil size to the data; can do subtractive or multiplicative normalization
+normalize_pupil_size <- function(data, model, subtractive = TRUE) {
+  # Predict pupil size based on the model
+  data <- data %>%
+    mutate(
+      AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize) / 2,
+      PredictedPupilSize = predict(model, newdata = data),
+      MeanPredictedSize = mean(PredictedPupilSize, na.rm = TRUE),  # Mean predicted size for scaling
+      NormalizedPupilSize = if (subtractive) {
+        # Subtractive normalization (retain scale)
+        AvgPupilSize - PredictedPupilSize + MeanPredictedSize
+      } else {
+        # Multiplicative normalization (scale relative to predicted)
+        (AvgPupilSize / PredictedPupilSize) * MeanPredictedSize
+      }
+    )
+  return(data)
+}
+
+# Normalized pupil size plotting
+create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
+  ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
+      geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
+    geom_smooth(aes(y = NormalizedPupilSize, color = "Normalized Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    scale_y_continuous(
+      name = "Pupil Size (mm)",
+      limits = y_limits,
+      sec.axis = sec_axis(~ . / luminosity_factor, name = "Luminosity")
+    ) +
+    theme_minimal() +
+    labs(
+      title = title,
+      x = "Time (seconds)",
+      y = "Pupil Size (mm)",
+      color = "Legend"
+    ) +
+    scale_color_manual(
+      values = c(
+        "Left Pupil Size" = "red",
+        "Right Pupil Size" = "black",
+        "Luminosity" = adjustcolor("green", alpha.f = 0.75),
+        "Normalized Pupil Size" = "blue"
+      ),
+      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity", "Normalized Pupil Size")
+    )
+}
+
+# Define common y-axis limits
+common_y_limits <- c(-3, 5)  # Adjust based on your data
+luminosity_factor <- 14     # Scaling factor for Luminosity
+
+# Create linear model
+model <- fit_model(data_interpolated)
+
+# Subtractive normalization
+data_subtractive <- normalize_pupil_size(data_interpolated, model, subtractive = TRUE)
+
+# Multiplicative normalization
+data_multiplicative <- normalize_pupil_size(data_interpolated, model, subtractive = FALSE)
+
+# Create plots for subtractive normalization
+plot1 <- create_pupil_plot(
+  data_subtractive %>% 
+    filter(data_subtractive$VideoMode == "Normal", data_subtractive$VideoName == "Main_Mono_HighLayer_Strong", data_subtractive$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
+plot2 <- create_pupil_plot(
+  data_subtractive %>% 
+    filter(data_subtractive$VideoMode == "Normal", data_subtractive$VideoName == "Main_Stereo_HighLayerStrong", data_subtractive$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
+plot3 <- create_pupil_plot(
+  data_subtractive %>% 
+    filter(data_subtractive$VideoMode == "Hallucinations", data_subtractive$VideoName == "Main_Mono_HighLayer_Strong", data_subtractive$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
+plot4 <- create_pupil_plot(
+  data_subtractive %>% 
+    filter(data_subtractive$VideoMode == "Hallucinations", data_subtractive$VideoName == "Main_Stereo_HighLayerStrong", data_subtractive$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
+
+# Combine all plots into a 2x2 layout and display
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") + # Collect the legends into one
+  plot_annotation(title = "Subject 2 Pupil Size Normalized by Luminosity (Subtractive)") # Add a supertitle
+
+print(p)
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
+
+
+# Create plots for multiplicative normalization
+plot1 <- create_pupil_plot(
+  data_multiplicative %>% 
+    filter(data_multiplicative$VideoMode == "Normal", data_multiplicative$VideoName == "Main_Mono_HighLayer_Strong", data_multiplicative$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
+plot2 <- create_pupil_plot(
+  data_multiplicative %>% 
+    filter(data_multiplicative$VideoMode == "Normal", data_multiplicative$VideoName == "Main_Stereo_HighLayerStrong", data_multiplicative$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
+plot3 <- create_pupil_plot(
+  data_multiplicative %>% 
+    filter(data_multiplicative$VideoMode == "Hallucinations", data_multiplicative$VideoName == "Main_Mono_HighLayer_Strong", data_multiplicative$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
+plot4 <- create_pupil_plot(
+  data_multiplicative %>% 
+    filter(data_multiplicative$VideoMode == "Hallucinations", data_multiplicative$VideoName == "Main_Stereo_HighLayerStrong", data_multiplicative$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
+
+# Combine all plots into a 2x2 layout and display
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") + # Collect the legends into one
+  plot_annotation(title = "Subject 2 Pupil Size Normalized by Luminosity (Subtractive)") # Add a supertitle
+
+print(p)
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
+
+
+
 ```
 
 ## Plotting Gaze Shifts Alongside Pupil Diameter
