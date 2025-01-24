@@ -21,6 +21,7 @@ library(here)
 library(ggplot2)
 library(zoo)
 library(patchwork)
+library(mgcv)
 
 # Set working directory
 mds_dir <- here::here()
@@ -260,21 +261,13 @@ fit_model <- function(data) {
   lm((LeftEyePupilSize + RightEyePupilSize) / 2 ~ Luminosity, data)
 }
 
-# Add normalized pupil size to the data; can do subtractive or multiplicative normalization
-normalize_pupil_size <- function(data, model, subtractive = TRUE) {
-  # Predict pupil size based on the model
+# Add normalized pupil size to the data, look at residuals
+normalize_pupil_size <- function(data, model) {
   data <- data %>%
     mutate(
       AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize) / 2,
       PredictedPupilSize = predict(model, newdata = data),
-      MeanPredictedSize = mean(PredictedPupilSize, na.rm = TRUE),  # Mean predicted size for scaling
-      NormalizedPupilSize = if (subtractive) {
-        # Subtractive normalization (retain scale)
-        AvgPupilSize - PredictedPupilSize + MeanPredictedSize
-      } else {
-        # Multiplicative normalization (scale relative to predicted)
-        (AvgPupilSize / PredictedPupilSize) * MeanPredictedSize
-      }
+      ResidualPupilSize = AvgPupilSize - PredictedPupilSize
     )
   return(data)
 }
@@ -285,7 +278,7 @@ create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
       geom_smooth(aes(y = round(LeftEyePupilSize, 3), color = "Left Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_smooth(aes(y = round(RightEyePupilSize, 3), color = "Right Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
-    geom_smooth(aes(y = NormalizedPupilSize, color = "Normalized Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+geom_smooth(aes(y = ResidualPupilSize, color = "Residual Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     scale_y_continuous(
       name = "Pupil Size (mm)",
       limits = y_limits,
@@ -303,24 +296,40 @@ create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
         "Left Pupil Size" = "red",
         "Right Pupil Size" = "black",
         "Luminosity" = adjustcolor("green", alpha.f = 0.75),
-        "Normalized Pupil Size" = "blue"
+        "Residual Pupil Size" = "blue"
       ),
-      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity", "Normalized Pupil Size")
+      breaks = c("Left Pupil Size", "Right Pupil Size", "Luminosity", "Residual Pupil Size")
     )
 }
 
 # Define common y-axis limits
-common_y_limits <- c(-3, 5)  # Adjust based on your data
+common_y_limits <- c(-2, 5)  # Adjust based on your data
 luminosity_factor <- 14     # Scaling factor for Luminosity
 
-# Create linear model
-model <- fit_model(data_interpolated)
+# Filter data to only include experiment
+filtered_data <- data_interpolated %>%
+  filter(
+    VideoMode %in% c("Normal", "Hallucinations") &
+    VideoName %in% c("Main_Mono_HighLayer_Strong", "Main_Stereo_HighLayerStrong") &
+    Phase == "Video"
+  )
 
-# Subtractive normalization
-data_subtractive <- normalize_pupil_size(data_interpolated, model, subtractive = TRUE)
+filtered_data <- filtered_data %>%
+  mutate(InverseLuminosity = 1 / Luminosity)
 
-# Multiplicative normalization
-data_multiplicative <- normalize_pupil_size(data_interpolated, model, subtractive = FALSE)
+# Linear model
+model <- lm((LeftEyePupilSize + RightEyePupilSize) / 2 ~ InverseLuminosity, data = filtered_data)
+
+# Non-linear model (generalized additive model)
+fit_gam_model <- function(data) {
+  gam((LeftEyePupilSize + RightEyePupilSize) / 2 ~ s(InverseLuminosity), data = data)
+}
+
+# Create the model
+model_gam <- fit_gam_model(data_interpolated)
+
+# Normalization
+data_subtractive <- normalize_pupil_size(filtered_data, model)
 
 # Create plots for subtractive normalization
 plot1 <- create_pupil_plot(
@@ -339,40 +348,13 @@ plot4 <- create_pupil_plot(
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
   plot_layout(guides = "collect") + # Collect the legends into one
-  plot_annotation(title = "Subject 2 Pupil Size Normalized by Luminosity (Subtractive)") # Add a supertitle
+  plot_annotation(title = "Subject 2 Pupil Size Normalized by Luminosity") # Add a supertitle
 
 print(p)
 print(plot1)
 print(plot2)
 print(plot3)
 print(plot4)
-
-
-# Create plots for multiplicative normalization
-plot1 <- create_pupil_plot(
-  data_multiplicative %>% 
-    filter(data_multiplicative$VideoMode == "Normal", data_multiplicative$VideoName == "Main_Mono_HighLayer_Strong", data_multiplicative$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
-plot2 <- create_pupil_plot(
-  data_multiplicative %>% 
-    filter(data_multiplicative$VideoMode == "Normal", data_multiplicative$VideoName == "Main_Stereo_HighLayerStrong", data_multiplicative$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
-plot3 <- create_pupil_plot(
-  data_multiplicative %>% 
-    filter(data_multiplicative$VideoMode == "Hallucinations", data_multiplicative$VideoName == "Main_Mono_HighLayer_Strong", data_multiplicative$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
-plot4 <- create_pupil_plot(
-  data_multiplicative %>% 
-    filter(data_multiplicative$VideoMode == "Hallucinations", data_multiplicative$VideoName == "Main_Stereo_HighLayerStrong", data_multiplicative$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
-
-# Combine all plots into a 2x2 layout and display
-p <- (plot1 + plot2) / (plot3 + plot4) +
-  plot_layout(guides = "collect") + # Collect the legends into one
-  plot_annotation(title = "Subject 2 Pupil Size Normalized by Luminosity (Subtractive)") # Add a supertitle
-
-print(p)
-print(plot1)
-print(plot2)
-print(plot3)
-print(plot4)
-
 
 
 ```
