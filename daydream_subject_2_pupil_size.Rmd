@@ -321,7 +321,8 @@ filtered_data <- filtered_data %>%
 model_linear <- lm((LeftEyePupilSize + RightEyePupilSize) / 2 ~ InverseLuminosity, data = filtered_data)
 
 # Non-linear(generalized additive) model
-model_gam <- gam((LeftEyePupilSize + RightEyePupilSize) / 2 ~ s(InverseLuminosity), data = filtered_data)
+model_gam <- gam((LeftEyePupilSize + RightEyePupilSize) / 2 ~ s(InverseLuminosity, k = 10), data = filtered_data)
+
 
 # Normalization
 data_linear <- normalize_pupil_size(filtered_data, model_linear)
@@ -330,16 +331,16 @@ data_gam <-normalize_pupil_size(filtered_data, model_gam)
 # Create plots with residuals from linear model
 plot1 <- create_pupil_plot(
   data_linear %>% 
-    filter(data_linear$VideoMode == "Normal", data_linear$VideoName == "Main_Mono_HighLayer_Strong", data_linear$Phase == "Video"), "Normal Mono Linear Residual", common_y_limits, luminosity_factor)
+    filter(data_linear$VideoMode == "Normal", data_linear$VideoName == "Main_Mono_HighLayer_Strong", data_linear$Phase == "Video"), "Normal Mono Linear", common_y_limits, luminosity_factor)
 plot2 <- create_pupil_plot(
   data_linear %>% 
-    filter(data_linear$VideoMode == "Normal", data_linear$VideoName == "Main_Stereo_HighLayerStrong", data_linear$Phase == "Video"), "Normal Stereo Linear Residual", common_y_limits, luminosity_factor)
+    filter(data_linear$VideoMode == "Normal", data_linear$VideoName == "Main_Stereo_HighLayerStrong", data_linear$Phase == "Video"), "Normal Stereo Linear", common_y_limits, luminosity_factor)
 plot3 <- create_pupil_plot(
   data_linear %>% 
-    filter(data_linear$VideoMode == "Hallucinations", data_linear$VideoName == "Main_Mono_HighLayer_Strong", data_linear$Phase == "Video"), "Hallucination Mono Linear Residual", common_y_limits, luminosity_factor)
+    filter(data_linear$VideoMode == "Hallucinations", data_linear$VideoName == "Main_Mono_HighLayer_Strong", data_linear$Phase == "Video"), "Hallucination Mono Linear", common_y_limits, luminosity_factor)
 plot4 <- create_pupil_plot(
   data_linear %>% 
-    filter(data_linear$VideoMode == "Hallucinations", data_linear$VideoName == "Main_Stereo_HighLayerStrong", data_linear$Phase == "Video"), "Hallucination Stereo Linear Residual", common_y_limits, luminosity_factor)
+    filter(data_linear$VideoMode == "Hallucinations", data_linear$VideoName == "Main_Stereo_HighLayerStrong", data_linear$Phase == "Video"), "Hallucination Stereo Linear ", common_y_limits, luminosity_factor)
 
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
@@ -355,16 +356,16 @@ print(plot4)
 # Create plots with residuals from non-linear (generalized additive) model
 plot1 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_HighLayer_Strong", data_gam$Phase == "Video"), "Normal Mono GAM Residual", common_y_limits, luminosity_factor)
+    filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_HighLayer_Strong", data_gam$Phase == "Video"), "Normal Mono GAM, k = 10", common_y_limits, luminosity_factor)
 plot2 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo GAM Residual", common_y_limits, luminosity_factor)
+    filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo GAM", common_y_limits, luminosity_factor)
 plot3 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_HighLayer_Strong", data_gam$Phase == "Video"), "Hallucination Mono GAM Residual", common_y_limits, luminosity_factor)
+    filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_HighLayer_Strong", data_gam$Phase == "Video"), "Hallucination Mono GAM", common_y_limits, luminosity_factor)
 plot4 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Stereo_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Stereo GAM Residual", common_y_limits, luminosity_factor)
+    filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Stereo_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Stereo GAM", common_y_limits, luminosity_factor)
 
 # Combine all plots into a 2x2 layout and display
 p <- (plot1 + plot2) / (plot3 + plot4) +
@@ -377,8 +378,8 @@ print(plot2)
 print(plot3)
 print(plot4)
 
-summary(model)
-summary(model_gam)
+#summary(model)
+#summary(model_gam)
 
 ```
 
