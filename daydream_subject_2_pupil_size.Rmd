@@ -87,9 +87,9 @@ data_interpolated <- data_interpolated %>%
   mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
   filter(Luminosity != 0)
 
-# Uncomment to visually check first 190 data points to make sure interpolation is correct 
-# head(data$LeftEyePupilSize, 190)
-# head(data_interpolated$LeftEyePupilSize, 190)
+# Uncomment to visually check first 50 data points to make sure interpolation is correct 
+head(data$LeftEyePupilSize, 50)
+head(data_interpolated$LeftEyePupilSize, 50)
 ```
 
 ## Plotting Pupil Size
