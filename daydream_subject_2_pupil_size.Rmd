@@ -28,6 +28,7 @@ mds_dir <- here::here()
 
 # Import data
 data <- read.csv("pilot/2_DeviceData.csv", sep=";")
+
 ```
 
 ## Splitting Vectors into Directional Components

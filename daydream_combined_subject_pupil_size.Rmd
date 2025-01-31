@@ -1,0 +1,97 @@
+---
+title: "DeepDream - Subject 2 Physiological Analysis"
+author:    |
+    | Colin Ayres  
+    | c.ayres@student.uw.edu.pl
+date: "January 2025"
+output: html_document
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages and Load Data
+
+```{r warning=FALSE, message=FALSE}
+# Load necessary packages
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(zoo)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+
+# Set working directory
+mds_dir <- here::here()
+
+# Import data
+data <- read.csv("pre-study/2_DeviceData.csv", sep=";")
+
+```
+
+## Splitting Vectors into Directional Components
+
+```{r}
+# Splitting CombinedEyeDirection column into directional vectors
+values <- gsub("[()]", "", data$CombinedEyeDirection) %>%
+  strsplit(",") %>%
+  lapply(as.numeric)
+data$CombinedEyeDirectionX <- sapply(values, `[`, 1)
+data$CombinedEyeDirectionY <- sapply(values, `[`, 2)
+data$CombinedEyeDirectionZ <- sapply(values, `[`, 3)
+```
+
+## Interpolate Values During Blinking
+
+While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
+
+```{r}
+# Interpolate blinking values
+data_interpolated <- data %>%
+  # Replace negative values with NA
+  mutate(
+    LeftEyePupilSize = ifelse(LeftEyePupilSize < 0, NA, LeftEyePupilSize),
+    RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize),
+    CombinedEyeDirectionX = ifelse(CombinedEyeDirectionX < -0.98, NA, CombinedEyeDirectionX),
+    CombinedEyeDirectionY = ifelse(CombinedEyeDirectionY < -0.98, NA, CombinedEyeDirectionY),
+    CombinedEyeDirectionZ = ifelse(CombinedEyeDirectionZ < -0.98, NA, CombinedEyeDirectionZ)
+  ) %>%
+  # Linearly interpolate missing (NA) values
+  mutate(
+    LeftEyePupilSize = zoo::na.approx(LeftEyePupilSize, na.rm = FALSE),
+    RightEyePupilSize = zoo::na.approx(RightEyePupilSize, na.rm = FALSE),
+    CombinedEyeDirectionX = zoo::na.approx(CombinedEyeDirectionX, na.rm = FALSE),
+    CombinedEyeDirectionY = zoo::na.approx(CombinedEyeDirectionY, na.rm = FALSE),
+    CombinedEyeDirectionZ = zoo::na.approx(CombinedEyeDirectionZ, na.rm = FALSE)
+
+  ) %>%
+  # Fill any remaining NAs at the very start or very beginning of the dataset
+  mutate(
+    LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE, fromLast = TRUE),
+    LeftEyePupilSize = zoo::na.locf(LeftEyePupilSize, na.rm = FALSE),
+    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE, fromLast = TRUE),
+    RightEyePupilSize = zoo::na.locf(RightEyePupilSize, na.rm = FALSE),
+    CombinedEyeDirectionX = zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionX = zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE),
+    CombinedEyeDirectionY = zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionY = zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE),
+    CombinedEyeDirectionZ = zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE, fromLast = TRUE),
+    CombinedEyeDirectionZ = zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE)
+    )
+
+# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
+# Also getting rid of values for which Luminosity = 0
+clean_phase_luminosity <- function(data) {
+  # Perform cleaning operations
+  data %>%
+    mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
+    filter(Luminosity != 0)
+}
+
+# Uncomment to visually check first 190 data points to make sure interpolation is correct 
+# head(data$LeftEyePupilSize, 190)
+# head(data_interpolated$LeftEyePupilSize, 190)
+```
