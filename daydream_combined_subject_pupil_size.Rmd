@@ -12,7 +12,7 @@ chunk_output_type: console
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Import Packages and Load Data
+## Import Packages
 
 ```{r warning=FALSE, message=FALSE}
 # Load necessary packages
@@ -26,30 +26,6 @@ library(mgcv)
 
 # Set working directory
 mds_dir <- here::here()
-
-# Import data
-raw_data <- read.csv("pre-study/2_DeviceData.csv", sep=";")
-
-# Import ALL subject data
-import_subjects <- function(data_dir = "pre-study") {
-  # Get list of all device data files
-  file_list <- list.files(
-    path = here(data_dir),
-    pattern = "\\d+_DeviceData\\.csv",
-    full.names = TRUE
-  )
-  
-  # Read and combine files with subject IDs
-  map_df(file_list, ~ {
-    read_csv(.x, col_types = cols(), show_col_types = FALSE) %>% 
-      mutate(
-        SubjectID = str_extract(.x, "\\d+(?=_DeviceData)"),
-        .before = 1
-      )
-  })
-}
-
-all_raw_data <- import_subjects()
 
 ```
 
@@ -110,16 +86,140 @@ clean_phase_luminosity <- function(data) {
 
 ```
 
-## Cleaning & Combining Data
+## Load and Process All Subject Data
+
+```{r warning=FALSE, message=FALSE}
+# Import data
+import_subjects <- function(data_dir = "pre-study") {
+  # Get list of all device data files
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "\\d+_DeviceData\\.csv",
+    full.names = TRUE
+  )
+  
+  # Read and combine files with semicolon separation
+  map_df(file_list, ~ {
+    read_delim(.x, 
+              delim = ";",
+              col_types = cols(.default = col_character()),
+              show_col_types = FALSE) %>% 
+      type_convert()  # Automatically convert columns to appropriate types
+  }) %>%
+    arrange(Id)  # Proper numeric sorting
+}
 
 
-```{r}
-processed_data <- raw_data %>%
-  clean_phase_luminosity() %>%
-  split_eye_direction() %>%
-  interpolate_blinking()
+# Process with subject isolation
+process_all_subjects <- function(raw_data) {
+  raw_data %>%
+    group_by(Id) %>%
+    group_modify(~ {
+      .x %>%
+        clean_phase_luminosity() %>%
+        split_eye_direction() %>%
+        interpolate_blinking()
+    }) %>%
+    ungroup() %>%
+    arrange(Id, ExperimentSecond)
+}
 
-# Uncomment to visually check first 150 data points to make sure interpolation is correct 
-#head(data$LeftEyePupilSize, 150)
-#head(datanew$LeftEyePupilSize, 150)
+# Import/process data
+processed_device_combined <- import_subjects() %>% process_all_subjects()
+
+```
+
+## Modelling Pupil Size vs. Luminosity
+
+
+```{r warning=FALSE, message=FALSE}
+# Add normalized pupil size to the data, look at residuals
+normalize_pupil_size <- function(data, model) {
+  data <- data %>%
+    mutate(
+      AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize) / 2,
+      PredictedPupilSize = predict(model, newdata = data),
+      ResidualPupilSize = AvgPupilSize - PredictedPupilSize
+    )
+  return(data)
+}
+
+# Normalized pupil size plotting
+create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
+  ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
+      geom_smooth(aes(y = round((LeftEyePupilSize + RightEyePupilSize) / 2, 3), color = "Avg. Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
+geom_smooth(aes(y = ResidualPupilSize, color = "Residual Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+    scale_y_continuous(
+      name = "Pupil Size (mm)",
+      limits = y_limits,
+      sec.axis = sec_axis(~ . / luminosity_factor, name = "Luminosity")
+    ) +
+    theme_minimal() +
+    labs(
+      title = title,
+      x = "Time (seconds)",
+      y = "Pupil Size (mm)",
+      color = "Legend"
+    ) +
+    scale_color_manual(
+      values = c(
+        "Avg. Pupil Size" = "black",
+        "Luminosity" = adjustcolor("green", alpha.f = 0.75),
+        "Residual Pupil Size" = "blue"
+      ),
+      breaks = c("Avg. Pupil Size", "Luminosity", "Residual Pupil Size")
+    )
+}
+
+# Define common y-axis limits
+common_y_limits <- c(-2, 5)  # Adjust based on your data
+luminosity_factor <- 14     # Scaling factor for Luminosity
+
+# Filter data to only include experiment
+filtered_data <- processed_device_combined %>%
+  filter(
+    VideoMode %in% c("Normal", "Hallucinations") &
+    Phase == "Video"
+  )
+
+# Adding InverseLuminosity Column
+filtered_data <- filtered_data %>%
+  mutate(InverseLuminosity = 1 / Luminosity)
+
+# Non-linear(generalized additive) model
+model_gam <- gam((LeftEyePupilSize + RightEyePupilSize) / 2 ~ s(InverseLuminosity, k = 10), data = filtered_data)
+data_gam <-normalize_pupil_size(filtered_data, model_gam)
+
+
+id <- 5
+# Create plots with residuals from non-linear (generalized additive) model
+plot1 <- create_pupil_plot(
+  data_gam %>% 
+    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Mono", id), common_y_limits, luminosity_factor)
+plot2 <- create_pupil_plot(
+  data_gam %>% 
+    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo", id), common_y_limits, luminosity_factor)
+plot3 <- create_pupil_plot(
+  data_gam %>% 
+    filter(data_gam$Id == id, data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
+plot4 <- create_pupil_plot(
+  data_gam %>% 
+    filter(data_gam$Id == id, data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Stereo_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
+
+# Combine all plots into a 2x2 layout and display
+p <- (plot1 + plot2) / (plot3 + plot4) +
+  plot_layout(guides = "collect") + # Collect the legends into one
+  plot_annotation(sprintf("Subject %s (Pre-Study) Pupil Size Normalized by Luminosity, Generalized Additive Model", id)) # Add a supertitle
+
+print(p)
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
+
+#summary(model)
+#summary(model_gam)
+
+summary(model_gam)
 ```
