@@ -175,21 +175,13 @@ geom_smooth(aes(y = ResidualPupilSize, color = "Residual Pupil Size"), se = FALS
 # All data plotting
 create_faceted_pupil_plots <- function(data, title, all_plot_y_limits, ncol = 5) {
   plot_data <- data %>%
+    group_by(Id) %>%
     mutate(
-      Id = as.character(Id) %>% 
-           str_trim() %>% 
-           replace(. == "", NA) %>% 
-           as.factor(),
-      TimeElapsed = as.numeric(ExperimentSecond) - min(as.numeric(ExperimentSecond)),
-      AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize)/2
-    ) %>%
-    filter(
-      !is.na(Id),
-      TimeElapsed <= 240,
-      complete.cases(AvgPupilSize)
+      TimeElapsed = ExperimentSecond - min(ExperimentSecond),  # Relative time per subject
+      AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize) / 2
     ) %>%
     ungroup()
-
+  
   ggplot(plot_data, aes(x = TimeElapsed, y = AvgPupilSize)) +
     geom_smooth(method = "loess", span = 0.015, se = FALSE, color = "#2c7bb6") +
     geom_point(size = 0.5, alpha = 0.2, color = "#636363") + 
@@ -197,12 +189,12 @@ create_faceted_pupil_plots <- function(data, title, all_plot_y_limits, ncol = 5)
     theme_minimal(base_size = 12) +
     labs(
       title = title,
-      x = "Experiment Time (seconds)",
+      x = "Time",
       y = "Average Pupil Size (mm)"
     ) +
     scale_y_continuous(
       limits = all_plot_y_limits,
-      breaks = seq(2.5, 5, by = 0.5)
+      breaks = seq(2, 5, by = 0.5)
     ) +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
@@ -223,9 +215,9 @@ create_faceted_pupil_plots <- function(data, title, all_plot_y_limits, ncol = 5)
 ```{r warning=FALSE, message=FALSE}
 # Define common variables
 common_y_limits <- c(-2, 5)  # Adjust based on your data
-all_plot_y_limits <- c(2.5, 5)
+all_plot_y_limits <- c(2, 5)
 luminosity_factor <- 14     # Scaling factor for Luminosity
-id <- 5
+id <- 9
 
 # Filter data to only include experiment
 filtered_data <- processed_device_combined %>%
@@ -263,13 +255,13 @@ p <- (plot1 + plot2) / (plot3 + plot4) +
   plot_layout(guides = "collect") + # Collect the legends into one
   plot_annotation(sprintf("Subject %s (Pre-Study) Pupil Size Normalized by Luminosity, Generalized Additive Model", id)) # Add a supertitle
 
-#print(p)
-#print(plot1)
-#print(plot2)
-#print(plot3)
-#print(plot4)
+print(p)
+print(plot1)
+print(plot2)
+print(plot3)
+print(plot4)
 
-#summary(model_gam)
+summary(model_gam)
 
 # Create plot from all subjects
 plotcombined1 <- create_faceted_pupil_plots(
