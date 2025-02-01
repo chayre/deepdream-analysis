@@ -28,13 +28,35 @@ library(mgcv)
 mds_dir <- here::here()
 
 # Import data
-data <- read.csv("pilot/2_DeviceData.csv", sep=";")
+raw_data <- read.csv("pre-study/2_DeviceData.csv", sep=";")
+
+# Import ALL subject data
+import_subjects <- function(data_dir = "pre-study") {
+  # Get list of all device data files
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "\\d+_DeviceData\\.csv",
+    full.names = TRUE
+  )
+  
+  # Read and combine files with subject IDs
+  map_df(file_list, ~ {
+    read_csv(.x, col_types = cols(), show_col_types = FALSE) %>% 
+      mutate(
+        SubjectID = str_extract(.x, "\\d+(?=_DeviceData)"),
+        .before = 1
+      )
+  })
+}
+
+all_raw_data <- import_subjects()
 
 ```
 
-## Splitting Vectors into Directional Components
+## Defining Functions to Clean & Combine Data
 
 ```{r}
+# Splitting Vectors into Directional Components
 split_eye_direction <- function(data) {
   data %>%
     mutate(
@@ -48,13 +70,8 @@ split_eye_direction <- function(data) {
       .keep = "unused"
     )
 }
-```
 
-## Interpolate Values During Blinking
-
-While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
-
-```{r}
+# While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
 # Interpolate blinking values
 interpolate_blinking <- function(data) {
   data %>%
@@ -91,7 +108,12 @@ clean_phase_luminosity <- function(data) {
     filter(Luminosity != 0)
 }
 
-# Equivalent to:
+```
+
+## Cleaning & Combining Data
+
+
+```{r}
 processed_data <- raw_data %>%
   clean_phase_luminosity() %>%
   split_eye_direction() %>%
