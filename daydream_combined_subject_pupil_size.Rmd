@@ -129,8 +129,8 @@ processed_device_combined <- import_subjects() %>% process_all_subjects()
 
 ```
 
-## Modelling Pupil Size vs. Luminosity
 
+## Plotting Functions
 
 ```{r warning=FALSE, message=FALSE}
 # Add normalized pupil size to the data, look at residuals
@@ -145,9 +145,9 @@ normalize_pupil_size <- function(data, model) {
 }
 
 # Normalized pupil size plotting
-create_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
+create_normalized_pupil_plot <- function(data, title, y_limits, luminosity_factor) {
   ggplot(data, aes(x = ExperimentSecond - ExperimentSecond[1])) +
-      geom_smooth(aes(y = round((LeftEyePupilSize + RightEyePupilSize) / 2, 3), color = "Avg. Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
+      geom_smooth(aes(y = round(AvgPupilSize, 3), color = "Avg. Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     geom_line(aes(y = Luminosity * luminosity_factor, color = "Luminosity")) +
 geom_smooth(aes(y = ResidualPupilSize, color = "Residual Pupil Size"), se = FALSE, method = "loess", span = 0.012) +
     scale_y_continuous(
@@ -172,9 +172,60 @@ geom_smooth(aes(y = ResidualPupilSize, color = "Residual Pupil Size"), se = FALS
     )
 }
 
-# Define common y-axis limits
+# All data plotting
+create_faceted_pupil_plots <- function(data, title, all_plot_y_limits, ncol = 5) {
+  plot_data <- data %>%
+    mutate(
+      Id = as.character(Id) %>% 
+           str_trim() %>% 
+           replace(. == "", NA) %>% 
+           as.factor(),
+      TimeElapsed = as.numeric(ExperimentSecond) - min(as.numeric(ExperimentSecond)),
+      AvgPupilSize = (LeftEyePupilSize + RightEyePupilSize)/2
+    ) %>%
+    filter(
+      !is.na(Id),
+      TimeElapsed <= 240,
+      complete.cases(AvgPupilSize)
+    ) %>%
+    ungroup()
+
+  ggplot(plot_data, aes(x = TimeElapsed, y = AvgPupilSize)) +
+    geom_smooth(method = "loess", span = 0.015, se = FALSE, color = "#2c7bb6") +
+    geom_point(size = 0.5, alpha = 0.2, color = "#636363") + 
+    facet_wrap(~ Id, ncol = ncol, drop = FALSE) +
+    theme_minimal(base_size = 12) +
+    labs(
+      title = title,
+      x = "Experiment Time (seconds)",
+      y = "Average Pupil Size (mm)"
+    ) +
+    scale_y_continuous(
+      limits = all_plot_y_limits,
+      breaks = seq(2.5, 5, by = 0.5)
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      strip.background = element_rect(fill = "#f0f0f0"),
+      strip.text = element_text(face = "bold", size = 10),
+      panel.spacing = unit(1.2, "lines"),
+      axis.text.x = element_blank() 
+    )
+}
+
+```
+
+
+
+## Modelling Pupil Size vs. Luminosity
+
+
+```{r warning=FALSE, message=FALSE}
+# Define common variables
 common_y_limits <- c(-2, 5)  # Adjust based on your data
+all_plot_y_limits <- c(2.5, 5)
 luminosity_factor <- 14     # Scaling factor for Luminosity
+id <- 5
 
 # Filter data to only include experiment
 filtered_data <- processed_device_combined %>%
@@ -190,16 +241,16 @@ filtered_data <- filtered_data %>%
 # Non-linear(generalized additive) model
 model_gam <- gam((LeftEyePupilSize + RightEyePupilSize) / 2 ~ s(InverseLuminosity, k = 10), data = filtered_data)
 data_gam <-normalize_pupil_size(filtered_data, model_gam)
+data_gam <- data_gam %>% mutate(Id = factor(Id))
+data_gam %>% filter(!is.na(Id)) %>% count()
 
-
-id <- 5
 # Create plots with residuals from non-linear (generalized additive) model
 plot1 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Mono", id), common_y_limits, luminosity_factor)
+    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
 plot2 <- create_pupil_plot(
   data_gam %>% 
-    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo", id), common_y_limits, luminosity_factor)
+    filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
 plot3 <- create_pupil_plot(
   data_gam %>% 
     filter(data_gam$Id == id, data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
@@ -212,14 +263,31 @@ p <- (plot1 + plot2) / (plot3 + plot4) +
   plot_layout(guides = "collect") + # Collect the legends into one
   plot_annotation(sprintf("Subject %s (Pre-Study) Pupil Size Normalized by Luminosity, Generalized Additive Model", id)) # Add a supertitle
 
-print(p)
-print(plot1)
-print(plot2)
-print(plot3)
-print(plot4)
+#print(p)
+#print(plot1)
+#print(plot2)
+#print(plot3)
+#print(plot4)
 
-#summary(model)
 #summary(model_gam)
 
-summary(model_gam)
+# Create plot from all subjects
+plotcombined1 <- create_faceted_pupil_plots(
+  data_gam %>% 
+    filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Mono (Pre-Study)", all_plot_y_limits)
+plotcombined2 <- create_faceted_pupil_plots(
+data_gam %>%
+filter(data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo (Pre-Study)", all_plot_y_limits)
+plotcombined3 <- create_faceted_pupil_plots(
+data_gam %>%
+filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Mono (Pre-Study)", all_plot_y_limits)
+plotcombined4 <- create_faceted_pupil_plots(
+data_gam %>%
+filter(data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Stereo_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Stereo (Pre-Study)", all_plot_y_limits)
+
+print(plotcombined1)
+print(plotcombined2)
+print(plotcombined3)
+print(plotcombined4)
+
 ```
