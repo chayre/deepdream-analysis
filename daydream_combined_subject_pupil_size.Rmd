@@ -23,6 +23,8 @@ library(zoo)
 library(dplyr)
 library(patchwork)
 library(mgcv)
+library(ggpubr)
+library(rstatix)
 
 # Set working directory
 mds_dir <- here::here()
@@ -207,10 +209,7 @@ create_faceted_pupil_plots <- function(data, title, all_plot_y_limits, ncol = 5)
 
 ```
 
-
-
 ## Modelling Pupil Size vs. Luminosity
-
 
 ```{r warning=FALSE, message=FALSE}
 # Define common variables
@@ -283,3 +282,94 @@ print(plotcombined3)
 print(plotcombined4)
 
 ```
+
+## Statistical Tests for Pupil Data
+
+```{r warning=FALSE, message=FALSE}
+
+# Create summary data for statistical testing
+condition_data <- data_gam %>%
+  filter(Phase == "Video") %>%
+  mutate(
+    Condition = case_when(
+      VideoName == "Main_Mono_Normal_HighLayerStrong" ~ "Normal_Mono",
+      VideoName == "Main_Mono_Hallucinations_HighLayerStrong" ~ "Hallucination_Mono",
+      VideoName == "Main_Stereo_Normal_HighLayerStrong" ~ "Normal_Stereo",
+      VideoName == "Main_Stereo_Hallucinations_HighLayerStrong" ~ "Hallucination_Stereo",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(Condition)) %>%
+  group_by(Id, Condition) %>%
+  summarize(
+    AvgPupilSize = mean((LeftEyePupilSize + RightEyePupilSize)/2, na.rm = TRUE),
+    ResidualPupilSize = mean(ResidualPupilSize, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Prepare paired comparisons
+comparisons <- list(
+  c("Normal_Mono", "Hallucination_Mono"),
+  c("Normal_Stereo", "Hallucination_Stereo")
+)
+
+# Perform paired t-tests with confidence intervals
+paired_t_avgpupil <- condition_data %>%
+  pairwise_t_test(
+    AvgPupilSize ~ Condition,
+    paired = TRUE,
+    comparisons = comparisons,
+    detailed = TRUE,  # This includes confidence intervals
+    p.adjust.method = "none"
+  )
+
+# Perform paired t-tests with confidence intervals
+paired_t_residual <- condition_data %>%
+  pairwise_t_test(
+    ResidualPupilSize ~ Condition,
+    paired = TRUE,
+    comparisons = comparisons,
+    detailed = TRUE, 
+    p.adjust.method = "none"
+  )
+
+# Print formatted results
+print(paired_t_avgpupil)
+print(paired_t_residual)
+
+# Visualize results
+ggplot(condition_data, aes(x = Condition, y = AvgPupilSize)) +
+  geom_boxplot(width = 0.4, outlier.shape = NA) +
+  geom_line(aes(group = Id), color = "gray", alpha = 0.4) +
+  geom_point(aes(color = Condition), size = 2, alpha = 0.8) +
+  stat_pvalue_manual(paired_t_avgpupil, label = "p = {p.adj}", 
+                     y.position = c(4.6, 4.6)) +
+  scale_x_discrete(
+    limits = c("Normal_Mono", "Hallucination_Mono", 
+               "Normal_Stereo", "Hallucination_Stereo") 
+  ) +
+  labs(title = "Mean Pupil Size Comparison Between Conditions (Paired t-test)",
+       y = "Mean Pupil Size Across Video Mode",
+       x = "Condition") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Visualize results
+ggplot(condition_data, aes(x = Condition, y = ResidualPupilSize)) +
+  geom_boxplot(width = 0.4, outlier.shape = NA) +
+  geom_line(aes(group = Id), color = "gray", alpha = 0.4) +
+  geom_point(aes(color = Condition), size = 2, alpha = 0.8) +
+  stat_pvalue_manual(paired_t_residual, label = "p = {p.adj}", 
+                     y.position = c(1.1, 1.1)) +
+  scale_x_discrete(
+    limits = c("Normal_Mono", "Hallucination_Mono", 
+               "Normal_Stereo", "Hallucination_Stereo") 
+  ) +
+  labs(title = "Mean Residual Pupil Size Comparison Between Conditions (Paired t-test)",
+       y = "Mean Residual Pupil Size Across Video Mode ",
+       x = "Condition") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
