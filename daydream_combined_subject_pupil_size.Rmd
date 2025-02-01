@@ -90,13 +90,12 @@ clean_phase_luminosity <- function(data) {
     mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
     filter(Luminosity != 0)
 }
-data <- clean_phase_luminosity(data)
 
-
-datanew <- clean_phase_luminosity(data)
-datanew <- split_eye_direction(datanew)
-datanew <- interpolate_blinking(datanew)
-
+# Equivalent to:
+processed_data <- raw_data %>%
+  clean_phase_luminosity() %>%
+  split_eye_direction() %>%
+  interpolate_blinking()
 
 # Uncomment to visually check first 150 data points to make sure interpolation is correct 
 #head(data$LeftEyePupilSize, 150)
