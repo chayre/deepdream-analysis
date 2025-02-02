@@ -753,19 +753,19 @@ plot_condition_comparison <- function(subject_id) {
   lapply(subject_results, function(sc) {
     # Stability Scores
     plot(sc$results$stability_scores, type = "l",
-         main = paste(sc$condition, "\nStability"),
+         main = paste("Subj", subject_id, sc$condition, "\nStability"),
          xlab = "", ylab = "Score",
          ylim = range(sc$results$stability_scores, na.rm = TRUE))
     
     # Angular Differences
     plot(sc$results$angular_differences, type = "l",
-         main = paste(sc$condition, "\nAngular Diff"),
+         main = paste("Subj", subject_id, sc$condition, "\nAngular Diff"),
          xlab = "", ylab = "Degrees",
          ylim = range(sc$results$angular_differences, na.rm = TRUE))
     
     # Vergence Angles
     plot(sc$results$vergence_angles, type = "l",
-         main = paste(sc$condition, "\nVergence"),
+         main = paste("Subj", subject_id, sc$condition, "\nVergence"),
          xlab = "", ylab = "Degrees",
          ylim = range(sc$results$vergence_angles, na.rm = TRUE))
   })
@@ -855,71 +855,120 @@ perform_paired_ttest <- function(condition_summary, metric, condition1, conditio
 }
 
 plot_paired_gaze_comparison <- function(ttest_result, plot_title = NULL) {
-  # Check required packages
-  require(ggplot2)
-  require(dplyr)
-  require(tidyr)
+  # Extract condition names and metric from test results
+  cond1 <- ttest_result$conditions[1]
+  cond2 <- ttest_result$conditions[2]
+  metric_name <- ttest_result$metric
   
-  # Extract data from ttest result object
-  paired_data <- ttest_result$paired_data %>%
+  # Prepare data in long format
+  paired_long <- ttest_result$paired_data %>%
     pivot_longer(
       cols = -Subject,
       names_to = "Condition",
       values_to = "Value"
-    )
+    ) %>%
+    mutate(Condition = factor(Condition, levels = c(cond1, cond2)))
+  
+  # Create color palette dynamically
+  #condition_colors <- viridis::viridis(2, begin = 0.3, end = 0.7)
+  #names(condition_colors) <- c(cond1, cond2)
+  
+  # Calculate y limits with space for annotations
+  y_max <- max(paired_long$Value) * 1.15
+  y_min <- min(paired_long$Value) * 0.95
   
   # Create base plot
-  p <- ggplot(paired_data, aes(x = Condition, y = Value)) +
-    geom_boxplot(aes(fill = Condition), alpha = 0.6, outlier.shape = NA) +
-    geom_point(aes(color = Condition), position = position_jitter(width = 0.1), size = 2) +
+  p <- ggplot(paired_long, aes(x = Condition, y = Value)) +
+    geom_boxplot(aes(fill = Condition), alpha = 0.6, width = 0.4, outlier.shape = NA) +
+    geom_point(aes(color = Condition), size = 2) +
     geom_line(aes(group = Subject), color = "gray50", alpha = 0.5) +
-    scale_fill_manual(values = c("Normal_Mono" = "#4E79A7", "Hallucination_Mono" = "#E15759")) +
-    scale_color_manual(values = c("Normal_Mono" = "#4E79A7", "Hallucination_Mono" = "#E15759")) +
+    #scale_fill_manual(values = condition_colors) +
+    #scale_color_manual(values = condition_colors) +
     labs(title = plot_title,
          subtitle = paste("Paired t-test: n =", ttest_result$n_pairs),
-         y = ttest_result$metric,
+         y = metric_name,
          x = "") +
     theme_minimal() +
     theme(legend.position = "none",
-          plot.title = element_text(face = "bold"))
+          plot.title = element_text(face = "bold"),
+          panel.grid.major.x = element_blank()) +
+    coord_cartesian(ylim = c(y_min, y_max))
   
   # Format p-value
   p_value <- format.pval(ttest_result$test_result$p.value,
                          digits = 3, eps = 0.001)
   if(as.numeric(p_value) < 0.001) p_value <- "< 0.001"
   
-  # Add annotations
+  # Add p-value annotation
   p <- p + annotate("text",
-                    x = 1.5, y = max(paired_data$Value) * 1.1,
+                    x = 1.5, y = max(
+ttest_result$paired_data[2], 
+ttest_result$paired_data[3]) * 1.1,
                     label = paste("p =", p_value),
-                    size = 4, fontface = "bold") +
-    annotate("text",
-             x = 1.5, y = max(paired_data$Value) * 1.05,
-             label = paste("d =", round(ttest_result$effect_size, 2)),
-             size = 4)
-  
+                    size = 4, fontface = "bold") 
   return(p)
 }
 
 
-
-
 # Compare Mean_Stability between Normal_Mono and Hallucination_Mono
-result <- perform_paired_ttest(
+nm_hm_meanstab_result <- perform_paired_ttest(
   condition_summary = condition_summary,
   metric = "Mean_Stability",
   condition1 = "Normal_Mono",
   condition2 = "Hallucination_Mono"
 )
-
-# View results
-#print(result$test_result)
-#cat("Cohen's d:", result$effect_size, "\n")
-#cat("Number of paired subjects:", result$n_pairs, "\n")
-
-
-plot_paired_gaze_comparison(result, 
+plot_paired_gaze_comparison(nm_hm_meanstab_result, 
                       "Pre-Study Stability Comparison: Normal vs Hallucination (Mono)")
 
+# Compare Mean_Stability between Normal_Stereo and Hallucination_Stereo
+ns_hs_meanstab_result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Mean_Stability",
+  condition1 = "Normal_Stereo",
+  condition2 = "Hallucination_Stereo"
+)
+plot_paired_gaze_comparison(ns_hs_meanstab_result, 
+                      "Pre-Study Stability Comparison: Normal vs Hallucination (Stereo)")
+
+
+# Compare Mean_Vergence between Normal_Mono and Hallucination_Mono
+nm_hm_meanverg_result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Mean_Vergence",
+  condition1 = "Normal_Mono",
+  condition2 = "Hallucination_Mono"
+)
+plot_paired_gaze_comparison(nm_hm_meanverg_result, 
+                      "Pre-Study Vergence Comparison: Normal vs Hallucination (Mono)")
+
+# Compare Mean_Vergence between Normal_Mono and Hallucination_Mono
+ns_hs_meanverg_result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Mean_Vergence",
+  condition1 = "Normal_Stereo",
+  condition2 = "Hallucination_Stereo"
+)
+plot_paired_gaze_comparison(ns_hs_meanverg_result, 
+                      "Pre-Study Vergence Comparison: Normal vs Hallucination (Stereo)")
+
+# Compare Number_Fixations between Normal_Mono and Hallucination_Mono
+nm_hm_numfix_result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Number_Fixations",
+  condition1 = "Normal_Mono",
+  condition2 = "Hallucination_Mono"
+)
+plot_paired_gaze_comparison(nm_hm_numfix_result, 
+                      "Pre-Study Number of Fixations Comparison: Normal vs Hallucination (Mono)")
+
+# Compare Number_Fixations between Normal_Mono and Hallucination_Mono
+ns_hs_numfix_result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Number_Fixations",
+  condition1 = "Normal_Stereo",
+  condition2 = "Hallucination_Stereo"
+)
+plot_paired_gaze_comparison(ns_hs_numfix_result, 
+                      "Pre-Study Number of Fixations Comparison: Normal vs Hallucination (Stereo)")
 
 ```
