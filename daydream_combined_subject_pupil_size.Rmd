@@ -236,16 +236,16 @@ data_gam <- data_gam %>% mutate(Id = factor(Id))
 data_gam %>% filter(!is.na(Id)) %>% count()
 
 # Create plots with residuals from non-linear (generalized additive) model
-plot1 <- create_pupil_plot(
+plot1 <- create_normalized_pupil_plot(
   data_gam %>% 
     filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Mono_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Mono", common_y_limits, luminosity_factor)
-plot2 <- create_pupil_plot(
+plot2 <- create_normalized_pupil_plot(
   data_gam %>% 
     filter(data_gam$Id == id, data_gam$VideoMode == "Normal", data_gam$VideoName == "Main_Stereo_Normal_HighLayerStrong", data_gam$Phase == "Video"), "Normal Stereo", common_y_limits, luminosity_factor)
-plot3 <- create_pupil_plot(
+plot3 <- create_normalized_pupil_plot(
   data_gam %>% 
     filter(data_gam$Id == id, data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Mono_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Mono", common_y_limits, luminosity_factor)
-plot4 <- create_pupil_plot(
+plot4 <- create_normalized_pupil_plot(
   data_gam %>% 
     filter(data_gam$Id == id, data_gam$VideoMode == "Hallucinations", data_gam$VideoName == "Main_Stereo_Hallucinations_HighLayerStrong", data_gam$Phase == "Video"), "Hallucination Stereo", common_y_limits, luminosity_factor)
 
@@ -371,5 +371,255 @@ ggplot(condition_data, aes(x = Condition, y = ResidualPupilSize)) +
   theme_minimal() +
   theme(legend.position = "none")
 
+```
+
+## Defining Function
+
+## Analyzing Gaze Data (Entire Sample)
+
+```{r warning=FALSE, message=FALSE}
+# Helper function to parse a string like "(-0.001, 175.308, 359.115)" into a numeric vector.
+parse_vector_string <- function(vec_string) {
+  # Remove parentheses
+  clean_string <- gsub("[()]", "", vec_string)
+  # Split by comma and optional spaces
+  parts <- strsplit(clean_string, ",\\s*")[[1]]
+  # Convert each part to numeric
+  as.numeric(parts)
+}
+
+# Function to convert Euler angles (roll, pitch, yaw) to a rotation matrix.
+# Assumes angles are in radians and the rotation order is: 
+# first rotate about x (roll), then about y (pitch), then about z (yaw),
+# resulting in R = R_z(yaw) %*% R_y(pitch) %*% R_x(roll).
+euler_to_matrix <- function(euler) {
+  # Unpack Euler angles
+  roll  <- euler[1] * pi / 180  # rotation about x-axis in radians
+  pitch <- euler[2] * pi / 180  # rotation about y-axis in radians
+  yaw   <- euler[3] * pi / 180  # rotation about z-axis in radians
+  
+  # Rotation matrix about the x-axis
+  R_x <- matrix(c(
+    1,         0,          0,
+    0, cos(roll), -sin(roll),
+    0, sin(roll),  cos(roll)
+  ), nrow = 3, byrow = TRUE)
+  
+  # Rotation matrix about the y-axis
+  R_y <- matrix(c(
+    cos(pitch), 0, sin(pitch),
+    0,          1,         0,
+    -sin(pitch), 0, cos(pitch)
+  ), nrow = 3, byrow = TRUE)
+  
+  # Rotation matrix about the z-axis
+  R_z <- matrix(c(
+    cos(yaw), -sin(yaw), 0,
+    sin(yaw),  cos(yaw), 0,
+    0,              0,   1
+  ), nrow = 3, byrow = TRUE)
+  
+  # Combine rotations: first roll, then pitch, then yaw.
+  # The resulting matrix rotates a vector from the headset's local coordinate system
+  # to world space.
+  rot_matrix <- R_z %*% R_y %*% R_x
+  return(rot_matrix)
+}
+
+# Function to calculate world gaze vectors using Euler angles for device rotation.
+# Assumes that 'data' is a data frame where:
+# - data[,"DeviceRotation"] contains a 3-element vector (roll, pitch, yaw) in radians,
+# - data[,"values"] contains the combined eye direction as a 3-element vector.
+calculate_world_gaze_vectors <- function(data) {
+  n_samples <- nrow(data)
+  world_vectors <- matrix(0, nrow = n_samples, ncol = 3)
+  
+  for(i in 1:n_samples) {
+    # Extract DeviceRotation Euler angles (roll, pitch, yaw)
+    # Ensure the rotation vector is numeric and of length 3.
+    # Extract DeviceRotation string and parse it into a numeric vector (roll, pitch, yaw in degrees)
+    rotation_string <- as.character(data[i, "DeviceRotation"])
+    rotation <- parse_vector_string(rotation_string)
+    rot_matrix <- euler_to_matrix(rotation)
+   
+    # Extract CombinedEyeDirection (x, y, z)
+    eye_direction <- as.numeric(trimws(unlist(data[i, "values"])))
+
+    #print(rotation_string <- as.character(data_gam[1, "DeviceRotation"]))
+    #print(euler_to_matrix(parse_vector_string(rotation_string)))
+    #print(as.numeric(trimws(unlist(data_gam[1, "values"]))))
+    
+    # Transform the eye direction vector from the headset's local space to world space
+    world_vectors[i, ] <- rot_matrix %*% eye_direction
+  }
+  
+  return(world_vectors)
+}
+
+# Calculate angle between vectors
+calculate_angular_diff <- function(v1, v2) {
+  v1_norm <- v1 / sqrt(sum(v1^2))
+  v2_norm <- v2 / sqrt(sum(v2^2))
+  
+  dot_prod <- sum(v1_norm * v2_norm)
+  dot_prod <- max(min(dot_prod, 1), -1)
+  angle_rad <- acos(dot_prod)
+  
+  return(angle_rad * 180 / pi)
+}
+
+# Calculate compensated gaze stability
+calculate_gaze_stability <- function(data, window_size = 30) {
+  world_vectors <- calculate_world_gaze_vectors(data)
+  
+  n_samples <- nrow(world_vectors)
+  angular_differences <- numeric(n_samples - 1)
+  
+  # Calculate angular differences between consecutive frames
+  for(i in 2:n_samples) {
+    angular_differences[i-1] <- calculate_angular_diff(
+      world_vectors[i,],
+      world_vectors[i-1,]
+    )
+  }
+  
+  # Calculate rolling stability scores
+  n_windows <- length(angular_differences) - window_size + 1
+  stability_scores <- numeric(n_windows)
+  
+  for(i in 1:n_windows) {
+    window <- angular_differences[i:(i + window_size - 1)]
+    stability_scores[i] <- mean(window)
+  }
+  
+  list(
+    stability_scores = stability_scores,
+    angular_differences = angular_differences
+  )
+}
+
+# Detect stable fixations
+detect_fixations <- function(angular_differences, max_angle = 1.0, min_duration = 10) {
+  n_samples <- length(angular_differences)
+  fixation_periods <- list()
+  current_start <- NULL
+  
+  for(i in 1:n_samples) {
+    if(angular_differences[i] <= max_angle) {
+      if(is.null(current_start)) {
+        current_start <- i
+      }
+    } else {
+      if(!is.null(current_start)) {
+        duration <- i - current_start
+        if(duration >= min_duration) {
+          fixation_periods[[length(fixation_periods) + 1]] <- c(current_start, i)
+        }
+        current_start <- NULL
+      }
+    }
+  }
+  
+  # Check for fixation at end
+  if(!is.null(current_start)) {
+    duration <- n_samples - current_start + 1
+    if(duration >= min_duration) {
+      fixation_periods[[length(fixation_periods) + 1]] <- c(current_start, n_samples)
+    }
+  }
+  
+  return(fixation_periods)
+}
+# Calculate vergence
+calculate_vergence <- function(data) {
+  n_samples <- nrow(data)
+  vergence_angles <- numeric(n_samples)
+  
+  for(i in 1:n_samples) {
+    left_dir <- parse_vector_string(as.character(data[i, "LeftEyeDirection"]))
+    right_dir <- parse_vector_string(as.character(data[i, "RightEyeDirection"]))
+    vergence_angles[i] <- calculate_angular_diff(left_dir, right_dir)
+  }
+  
+  return(vergence_angles)
+}
+
+# Main analysis function
+analyze_eye_tracking <- function(data, window_size = 30) {
+  # Calculate stability metrics
+  stability_results <- calculate_gaze_stability(data, window_size)
+  
+  # Calculate vergence
+  vergence_angles <- calculate_vergence(data)
+  
+  # Detect fixations
+  fixation_periods <- detect_fixations(stability_results$angular_differences)
+  
+  # Calculate comprehensive metrics
+  metrics <- list(
+    # Stability metrics
+    mean_stability = mean(stability_results$stability_scores),
+    std_stability = sd(stability_results$stability_scores),
+    max_angular_difference = max(stability_results$angular_differences),
+    
+    # Fixation metrics
+    number_of_fixations = length(fixation_periods),
+    total_fixation_time = sum(sapply(fixation_periods, function(x) x[2] - x[1])),
+    fixation_periods = fixation_periods,
+    
+    # Eye metrics
+    mean_left_openness = mean(data$LeftEyeOpeness),
+    mean_right_openness = mean(data$RightEyeOpeness),
+    mean_left_pupil = mean(data$LeftEyePupilSize),
+    mean_right_pupil = mean(data$RightEyePupilSize),
+    
+    # Vergence metrics
+    mean_vergence = mean(vergence_angles),
+    std_vergence = sd(vergence_angles),
+    
+    # Raw data for plotting
+    stability_scores = stability_results$stability_scores,
+    angular_differences = stability_results$angular_differences,
+    vergence_angles = vergence_angles
+  )
+  
+  return(metrics)
+}
+
+# Execute Analysis
+results <- analyze_eye_tracking(data_gam)
+
+# Basic plotting function
+plot_eye_tracking <- function(results) {
+  # Create basic plots using base R
+  par(mfrow = c(2, 2))
+  
+  # Stability scores over time
+  plot(results$stability_scores, type = "l",
+       main = "Gaze Stability Over Time",
+       xlab = "Frame", ylab = "Stability Score", ylim = range(results$stability_scores, na.rm = TRUE))
+  
+  # Angular differences
+  plot(results$angular_differences, type = "l",
+       main = "Angular Differences Between Frames",
+       xlab = "Frame", ylab = "Angular Difference (degrees)", ylim = range(results$angular_differences, na.rm = TRUE))
+  
+  # Vergence angles
+  plot(results$vergence_angles, type = "l",
+       main = "Vergence Angles Over Time",
+       xlab = "Frame", ylab = "Vergence Angle (degrees)", ylim = range(results$angular_differences, na.rm = TRUE))
+  
+  # Reset plot layout
+  par(mfrow = c(1, 1))
+}
+
+# Plot Results
+plot_eye_tracking(results)
+
+
+summary(results$stability_scores)
+summary(results$angular_differences)
+summary(results$vergence_angles)
+#results$total_fixation_time
 ```
 
