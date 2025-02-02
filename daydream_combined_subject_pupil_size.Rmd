@@ -373,11 +373,9 @@ ggplot(condition_data, aes(x = Condition, y = ResidualPupilSize)) +
 
 ```
 
-## Defining Function
+## Defining Functions for Gaze Analysis
 
-## Analyzing Gaze Data (Entire Sample)
-
-```{r warning=FALSE, message=FALSE}
+```{r}
 # Helper function to parse a string like "(-0.001, 175.308, 359.115)" into a numeric vector.
 parse_vector_string <- function(vec_string) {
   # Remove parentheses
@@ -530,6 +528,7 @@ detect_fixations <- function(angular_differences, max_angle = 1.0, min_duration 
   
   return(fixation_periods)
 }
+
 # Calculate vergence
 calculate_vergence <- function(data) {
   n_samples <- nrow(data)
@@ -574,52 +573,353 @@ analyze_eye_tracking <- function(data, window_size = 30) {
     mean_right_pupil = mean(data$RightEyePupilSize),
     
     # Vergence metrics
-    mean_vergence = mean(vergence_angles),
-    std_vergence = sd(vergence_angles),
+    mean_vergence = mean(vergence_angles, na.rm = TRUE),
+    std_vergence = sd(vergence_angles, na.rm =TRUE),
     
     # Raw data for plotting
     stability_scores = stability_results$stability_scores,
     angular_differences = stability_results$angular_differences,
-    vergence_angles = vergence_angles
+    vergence_angles = na.omit(vergence_angles)
   )
   
   return(metrics)
 }
 
+```
+
+## Analyzing Gaze Data (Entire Sample)
+
+```{r warning=FALSE, message=FALSE}
+
 # Execute Analysis
 results <- analyze_eye_tracking(data_gam)
 
-# Basic plotting function
-plot_eye_tracking <- function(results) {
+# Cumulative plotting function
+plot_eye_tracking_cumulative <- function(results) {
   # Create basic plots using base R
   par(mfrow = c(2, 2))
   
   # Stability scores over time
   plot(results$stability_scores, type = "l",
-       main = "Gaze Stability Over Time",
+       main = "Pre-Study Gaze Stability Over Time",
        xlab = "Frame", ylab = "Stability Score", ylim = range(results$stability_scores, na.rm = TRUE))
   
   # Angular differences
   plot(results$angular_differences, type = "l",
-       main = "Angular Differences Between Frames",
+       main = "Pre-Study Angular Differences Between Frames",
        xlab = "Frame", ylab = "Angular Difference (degrees)", ylim = range(results$angular_differences, na.rm = TRUE))
   
   # Vergence angles
   plot(results$vergence_angles, type = "l",
-       main = "Vergence Angles Over Time",
-       xlab = "Frame", ylab = "Vergence Angle (degrees)", ylim = range(results$angular_differences, na.rm = TRUE))
+       main = "Pre-Study Vergence Angles Over Time",
+       xlab = "Frame", ylab = "Vergence Angle (degrees)", ylim = range(results$vergence_angles, na.rm = TRUE))
   
   # Reset plot layout
   par(mfrow = c(1, 1))
 }
 
 # Plot Results
-plot_eye_tracking(results)
-
-
+plot_eye_tracking_cumulative(results)
 summary(results$stability_scores)
 summary(results$angular_differences)
 summary(results$vergence_angles)
-#results$total_fixation_time
+
+```
+## Gaze Analysis on Subject-by-Subject Basis
+
+```{r warning=FALSE, message=FALSE}
+# Split the data into a list of dataframes by Id
+subject_data <- split(data_gam, data_gam$Id)
+
+# Analyze each subject separately
+subject_results <- lapply(subject_data, function(subject_df) {
+  analyze_eye_tracking(subject_df)
+})
+
+# Function to plot eye tracking on subject-by-subject basis
+plot_eye_tracking_subject <- function(results, subject_id) {
+  par(mfrow = c(2, 2))
+  
+  # Stability scores over time
+  plot(results$stability_scores, type = "l",
+       main = paste("Pre-Study Subject", subject_id, "- Gaze Stability"),
+       xlab = "Frame", ylab = "Stability Score", ylim = range(results$stability_scores, na.rm = TRUE))
+  
+  #Angular differences
+  plot(results$angular_differences, type = "l",
+       main = paste("Pre-Study Subject", subject_id, "- Angular Differences"),
+       xlab = "Frame", ylab = "Angular Difference (degrees)", ylim = range(results$angular_differences, na.rm = TRUE))
+  
+  # Vergence angles
+  plot(results$vergence_angles, type = "l",
+      main = paste("Pre-Study Subject", subject_id, "- Vergence Angles"),
+       xlab = "Frame", ylab = "Vergence Angle (degrees)", ylim = range(results$vergence_angles, na.rm = TRUE))
+  
+  par(mfrow = c(1, 1))
+}
+
+# Create a directory to save plots (if it doesn't exist)
+#dir.create("pre_study_subject_plots", showWarnings = FALSE)
+
+# Generate and save plots for each subject
+#lapply(names(subject_results), function(subject_id) {
+  # Save plots to PNG files
+  #png(paste0("subject_plots/subject_", subject_id, "_plots.png"), width = 800, height = 600)
+  #plot_eye_tracking(subject_results[[subject_id]], subject_id)
+  #dev.off()
+#})
+
+# Extract summary metrics for all subjects
+summary_metrics <- do.call(rbind, lapply(names(subject_results), function(subject_id) {
+  metrics <- subject_results[[subject_id]]
+  data.frame(
+    Subject = subject_id,
+    Mean_Stability = metrics$mean_stability,
+    Std_Stability = metrics$std_stability,
+    Number_Fixations = metrics$number_of_fixations,
+    Mean_Vergence = metrics$mean_vergence,
+    Std_Vergence = metrics$std_vergence
+  )
+}))
+
+na.omit(subject_results[1])
+
+
+# Plot Results
+plot_eye_tracking_subject(subject_results[[1]], 1)
+plot_eye_tracking_subject(subject_results[[2]], 2)
+plot_eye_tracking_subject(subject_results[[3]], 3)
+plot_eye_tracking_subject(subject_results[[4]], 4)
+plot_eye_tracking_subject(subject_results[[5]], 5)
+plot_eye_tracking_cumulative(subject_results[[6]], 6)
+plot_eye_tracking_cumulative(subject_results[[7]], 7)
+plot_eye_tracking_cumulative(subject_results[[8]], 8)
+plot_eye_tracking_cumulative(subject_results[[9]], 9)
+plot_eye_tracking_cumulative(subject_results[[10]], 10)
+plot_eye_tracking_cumulative(subject_results[[11]], 11)
+plot_eye_tracking_cumulative(subject_results[[12]], 12)
+plot_eye_tracking_cumulative(subject_results[[13]], 13)
+plot_eye_tracking_cumulative(subject_results[[14]], 14)
+# View the summary
+print(summary_metrics)
+
+```
+## Gaze Analysis on Subject-by-Subject Basis
+
+```{r warning=FALSE, message=FALSE}
+# Add Condition column to full dataset
+subject_condition_data <- data_gam %>%
+  mutate(
+    Condition = case_when(
+      Phase == "Video" & VideoName == "Main_Mono_Normal_HighLayerStrong" ~ "Normal_Mono",
+      Phase == "Video" & VideoName == "Main_Mono_Hallucinations_HighLayerStrong" ~ "Hallucination_Mono",
+      Phase == "Video" & VideoName == "Main_Stereo_Normal_HighLayerStrong" ~ "Normal_Stereo",
+      Phase == "Video" & VideoName == "Main_Stereo_Hallucinations_HighLayerStrong" ~ "Hallucination_Stereo",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Split data into nested structure: Subject -> Condition
+subject_condition_data <- subject_condition_data %>%
+  filter(!is.na(Condition)) %>%       # Keep only rows with valid conditions
+  split(list(.$Id, .$Condition)) %>%  # Split into Subject-Condition groups
+  lapply(function(x) {                # Remove grouping columns
+    x %>% select(-Id, -Condition)
+  })
+
+# Analyze all subject-condition combinations
+subject_condition_results <- lapply(
+  names(subject_condition_data),
+  function(name) {
+    parts <- strsplit(name, "\\.")[[1]]
+    list(
+      subject_id = parts[1],
+      condition = parts[2],
+      results = analyze_eye_tracking(subject_condition_data[[name]])
+    )
+  }
+)
+
+plot_condition_comparison <- function(subject_id) {
+  # Filter results for the target subject
+  subject_results <- subject_condition_results[
+    sapply(subject_condition_results, function(x) x$subject_id == subject_id)
+  ]
+  
+  # Set up plot layout
+  par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))  # 3 metrics x 4 conditions
+  
+  # Plot each condition
+  lapply(subject_results, function(sc) {
+    # Stability Scores
+    plot(sc$results$stability_scores, type = "l",
+         main = paste(sc$condition, "\nStability"),
+         xlab = "", ylab = "Score",
+         ylim = range(sc$results$stability_scores, na.rm = TRUE))
+    
+    # Angular Differences
+    plot(sc$results$angular_differences, type = "l",
+         main = paste(sc$condition, "\nAngular Diff"),
+         xlab = "", ylab = "Degrees",
+         ylim = range(sc$results$angular_differences, na.rm = TRUE))
+    
+    # Vergence Angles
+    plot(sc$results$vergence_angles, type = "l",
+         main = paste(sc$condition, "\nVergence"),
+         xlab = "", ylab = "Degrees",
+         ylim = range(sc$results$vergence_angles, na.rm = TRUE))
+  })
+  
+  par(mfrow = c(1, 1))  # Reset layout
+}
+
+# Generate comparison summary
+condition_summary <- do.call(rbind, lapply(subject_condition_results, function(sc) {
+  data.frame(
+    Subject = sc$subject_id,
+    Condition = sc$condition,
+    Mean_Stability = sc$results$mean_stability,
+    Std_Stability = sc$results$std_stability,
+    Mean_Vergence = sc$results$mean_vergence,
+    Number_Fixations = sc$results$number_of_fixations
+  )
+}))
+
+# Example usage
+plot_condition_comparison("1") 
+
+# View summary
+print(condition_summary)
+
 ```
 
+## Statistical Testing of Gaze Analysis
+```{r warning=FALSE, message=FALSE}
+# Function for Paired T-test
+perform_paired_ttest <- function(condition_summary, metric, condition1, condition2) {
+  # Check if metric exists in the data
+  if(!metric %in% names(condition_summary)) {
+    stop(paste("Metric", metric, "not found in condition summary"))
+  }
+  
+  # Check if conditions exist
+  available_conditions <- unique(condition_summary$Condition)
+  if(!all(c(condition1, condition2) %in% available_conditions)) {
+    stop(paste("One or both conditions not found. Available conditions:", 
+               paste(available_conditions, collapse = ", ")))
+  }
+  
+  # Reshape data to wide format
+  wide_data <- condition_summary %>%
+    select(Subject, Condition, all_of(metric)) %>%
+    pivot_wider(
+      names_from = Condition,
+      values_from = all_of(metric)
+    )
+  
+  # Check if both conditions exist after reshaping
+  if(!all(c(condition1, condition2) %in% names(wide_data))) {
+    stop("Could not find both conditions in the wide data format")
+  }
+  
+  # Extract paired data
+  paired_data <- wide_data %>%
+    select(Subject, all_of(c(condition1, condition2))) %>%
+    na.omit()
+  
+  # Check sample size
+  if(nrow(paired_data) < 2) {
+    stop("Insufficient paired observations (need at least 2 subjects with data in both conditions)")
+  }
+  
+  # Perform paired t-test
+  ttest_result <- t.test(
+    paired_data[[condition1]],
+    paired_data[[condition2]],
+    paired = TRUE
+  )
+  
+  # Calculate Cohen's d effect size
+  differences <- paired_data[[condition1]] - paired_data[[condition2]]
+  cohens_d <- mean(differences, na.rm = TRUE) / sd(differences, na.rm = TRUE)
+  
+  # Return comprehensive results
+  list(
+    test_result = ttest_result,
+    effect_size = cohens_d,
+    n_pairs = nrow(paired_data),
+    paired_data = paired_data,
+    conditions = c(condition1, condition2),
+    metric = metric
+  )
+}
+
+plot_paired_gaze_comparison <- function(ttest_result, plot_title = NULL) {
+  # Check required packages
+  require(ggplot2)
+  require(dplyr)
+  require(tidyr)
+  
+  # Extract data from ttest result object
+  paired_data <- ttest_result$paired_data %>%
+    pivot_longer(
+      cols = -Subject,
+      names_to = "Condition",
+      values_to = "Value"
+    )
+  
+  # Create base plot
+  p <- ggplot(paired_data, aes(x = Condition, y = Value)) +
+    geom_boxplot(aes(fill = Condition), alpha = 0.6, outlier.shape = NA) +
+    geom_point(aes(color = Condition), position = position_jitter(width = 0.1), size = 2) +
+    geom_line(aes(group = Subject), color = "gray50", alpha = 0.5) +
+    scale_fill_manual(values = c("Normal_Mono" = "#4E79A7", "Hallucination_Mono" = "#E15759")) +
+    scale_color_manual(values = c("Normal_Mono" = "#4E79A7", "Hallucination_Mono" = "#E15759")) +
+    labs(title = plot_title,
+         subtitle = paste("Paired t-test: n =", ttest_result$n_pairs),
+         y = ttest_result$metric,
+         x = "") +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(face = "bold"))
+  
+  # Format p-value
+  p_value <- format.pval(ttest_result$test_result$p.value,
+                         digits = 3, eps = 0.001)
+  if(as.numeric(p_value) < 0.001) p_value <- "< 0.001"
+  
+  # Add annotations
+  p <- p + annotate("text",
+                    x = 1.5, y = max(paired_data$Value) * 1.1,
+                    label = paste("p =", p_value),
+                    size = 4, fontface = "bold") +
+    annotate("text",
+             x = 1.5, y = max(paired_data$Value) * 1.05,
+             label = paste("d =", round(ttest_result$effect_size, 2)),
+             size = 4)
+  
+  return(p)
+}
+
+
+
+
+# Compare Mean_Stability between Normal_Mono and Hallucination_Mono
+result <- perform_paired_ttest(
+  condition_summary = condition_summary,
+  metric = "Mean_Stability",
+  condition1 = "Normal_Mono",
+  condition2 = "Hallucination_Mono"
+)
+
+# View results
+#print(result$test_result)
+#cat("Cohen's d:", result$effect_size, "\n")
+#cat("Number of paired subjects:", result$n_pairs, "\n")
+
+
+plot_paired_gaze_comparison(result, 
+                      "Pre-Study Stability Comparison: Normal vs Hallucination (Mono)")
+
+
+```
