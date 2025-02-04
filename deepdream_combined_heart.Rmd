@@ -167,169 +167,9 @@ data_base_processed <- process_all_subjects(data_base)
 
 ```
 
-## ECG Statistical Testing Between Events
+## Investigating Events
 
 ```{r}
-
-calculate_sdnn <- function(rr_intervals) {
-  sd(rr_intervals, na.rm = TRUE)
-}
-
-calculate_rmssd <- function(rr_intervals) {
-  rr_diffs <- diff(rr_intervals)  # Compute successive differences
-  sqrt(mean(rr_diffs^2, na.rm = TRUE))  # Root mean square
-}
-
-summarydata <- data_exp %>%
-  group_by(Id, EVENT) %>%
-  summarise(
-    Mean_HR = mean(`Heart Rate`, na.rm = TRUE),  # Average Heart Rate
-    HRV_SDNN = calculate_sdnn(`ECG R-R`),
-    HRV_RMSSD = calculate_rmssd(`ECG R-R`)
-  ) %>%
-  ungroup()
-
-summary(summarydata$HRV_SDNN)
-summary(summarydata$HRV_RMSSD)
-
-summarydata
-
-
-# Function to compute Mean HR and HRV (SDNN) for subjects 1-14 in events 0, 1, or 2
-compute_hr_hrv <- function(data) {
-  data %>%
-    filter(Id %in% 1:14, EVENT %in% c(0, 1, 2)) %>%
-    group_by(Id, EVENT) %>%
-    summarise(
-      Mean_HR = mean(`Heart Rate`, na.rm = TRUE),
-      HRV_SDNN = sd(`ECG R-R`, na.rm = TRUE),  # Standard deviation of RR intervals
-      .groups = "drop"
-    )
-}
-
-# Function to plot paired boxplots with p-values and connecting lines
-plot_hr_hrv_paired <- function(hr_hrv_data) {
-  plots <- list()
-  
-  # Define event pairs for comparison
-  event_pairs <- list(c(0, 1), c(0, 2), c(1, 2))
-  
-  for (pair in event_pairs) {
-    df_pair <- hr_hrv_data %>% 
-      filter(EVENT %in% pair) %>%
-      select(Id, EVENT, Mean_HR, HRV_SDNN) %>%
-      pivot_wider(names_from = EVENT, values_from = c(Mean_HR, HRV_SDNN))  # Convert to wide format
-
-    # Paired t-tests
-    hr_test <- t.test(df_pair[[paste0("Mean_HR_", pair[1])]], 
-                      df_pair[[paste0("Mean_HR_", pair[2])]], 
-                      paired = TRUE, na.action = na.omit)
-
-    hrv_test <- t.test(df_pair[[paste0("HRV_SDNN_", pair[1])]], 
-                       df_pair[[paste0("HRV_SDNN_", pair[2])]], 
-                       paired = TRUE, na.action = na.omit)
-
-    # Convert back to long format for boxplots with connecting lines
-    df_long <- hr_hrv_data %>% filter(EVENT %in% pair)
-
-    # Boxplot for HR with connecting lines
-    p_hr <- ggplot(df_long, aes(x = factor(EVENT), y = Mean_HR, fill = factor(EVENT))) +
-      geom_boxplot(alpha = 0.6) +
-      geom_line(aes(group = Id), color = "gray50", alpha = 0.5) +  # Add connecting lines
-      geom_point(aes(color = "gray50"), alpha = 0.5, show.legend = FALSE) +  # Add points for clarity
-      labs(title = paste("Heart Rate (HR): EVENT", pair[1], "vs.", pair[2]), 
-           x = "EVENT", y = "Mean HR (bpm)") +
-      theme_minimal() +
-      annotate("text", x = 1.5, y = max(df_long$Mean_HR, na.rm = TRUE), 
-               label = paste("p =", signif(hr_test$p.value, 3)), size = 5)
-
-    # Boxplot for HRV with connecting lines
-    p_hrv <- ggplot(df_long, aes(x = factor(EVENT), y = HRV_SDNN, fill = factor(EVENT))) +
-      geom_boxplot(alpha = 0.6) +
-      geom_line(aes(group = Id), color = "gray50", alpha = 0.5) +  # Add connecting lines
-      geom_point(aes(color = "gray50"), alpha = 0.5, show.legend = FALSE) +  # Add points for clarity
-      labs(title = paste("Heart Rate Variability (HRV): EVENT", pair[1], "vs.", pair[2]), 
-           x = "EVENT", y = "HRV (SDNN, ms)") +
-      theme_minimal() +
-      annotate("text", x = 1.5, y = max(df_long$HRV_SDNN, na.rm = TRUE), 
-               label = paste("p =", signif(hrv_test$p.value, 3)), size = 5)
-
-    # Store plots
-    plots[[paste0("HR_", pair[1], "_vs_", pair[2])]] <- p_hr
-    plots[[paste0("HRV_", pair[1], "_vs_", pair[2])]] <- p_hrv
-  }
-  
-  return(plots)
-}
-
-
-# Example Usage:
-#hr_hrv_data <- compute_hr_hrv(data_exp)  # Compute HR & HRV
-#t_test_results <- paired_t_test(hr_hrv_data)  # Run paired t-tests
-
-# View results
-#t_test_results
-
-
-# Example Usage:
-#paired_plots <- plot_hr_hrv_paired(hr_hrv_data)
-
-# Display plots
-#print(paired_plots$HR_0_vs_1)
-#print(paired_plots$HR_0_vs_2)
-#print(paired_plots$HR_1_vs_2)
-
-#print(paired_plots$HRV_0_vs_1)
-#print(paired_plots$HRV_0_vs_2)
-#print(paired_plots$HRV_1_vs_2)
-
-#hr_hrv_data
-
-#unique(nozero$EVENT)
-
-#nozero$`ECG B, X, ECG2-R`
-
-
-#filtered_data <- nozero[nozero$Id == 3, ]
-#id_filtered <- filtered_data[filtered_data$EVENT == 4, ]
-
-
-#summary(nozero$`ECG R-R`)
-#table(nozero$`ECG R-R`)  # Check for unexpected 0 values
-
-
-
-# Create the plot
-ggplot(filtered_data, aes(x = seq_along(`ECG B, X, ECG2-R`), y = `ECG B, X, ECG2-R`)) +
-  geom_line(color = "blue") +  # Plot ECG data
-  #geom_point(color = "red", size = 1, alpha = 0.7) +  # Mark points
-
-  # Add background shading for different EVENTS
-  geom_rect(aes(xmin = seq_along(`ECG B, X, ECG2-R`), 
-                xmax = seq_along(`ECG B, X, ECG2-R`), 
-                ymin = -Inf, ymax = Inf, 
-                fill = as.factor(EVENT)), 
-            alpha = 0.1) +  # Transparency
-  
-  #scale_fill_manual(values = c("0" = "gray90", "1" = "lightblue", "2" = "lightgreen")) +  # Event colors
-  labs(title = "ECG B, X, ECG2-R for Subject 1",
-       x = "Index", 
-       y = "ECG Signal",
-       fill = "EVENT") +  
-  theme_minimal()
-
-
-event_counts <- data_exp %>%
-  group_by(Id, EVENT) %>%
-  summarise(Count = n(), .groups = "drop")
-
-# Print table
-print(event_counts)
-
-
-
-
-
 plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
   # Filter data for the given Id and remove EVENT = 0
   subject_data <- data %>% 
@@ -349,11 +189,11 @@ plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
 # Execution
 map(1:14, plot_event_by_frame)  # Loop through Ids 1-14
 
-
-
 ```
 
 ## Looking Between Events 4 and 8 for Experimental Data
+
+### There are four sections of data per subject that occur between an event 4 and event 8 marker. Ensure there are no extraneous 4 events before proceeding with analysis
 
 ```{r}
 # In the experimental data, Subject 2, there is a random event 4 at the start of the data which does not correlate to an event 8 (the next event 8 happens ~1000 seconds later). I'm filtering this out.
@@ -478,9 +318,91 @@ ttest_all_results <- run_all_paired_ttests(results)
 print(ttest_all_results)
 
 ```
-## Paired T-test for HRV
+## Plotting Paired T-test Results
 
 ```{r}
+plot_individual_paired_comparisons <- function(data, ttest_results, metric = "mean_heart_rate") {
+  # Filter results for specified metric
+  metric_results <- ttest_results %>%
+    filter(metric == !!metric) %>%
+    mutate(
+      section1 = as.numeric(sub(" vs.*", "", comparison)),
+      section2 = as.numeric(sub(".*vs ", "", comparison))
+    )
+  
+  # Create list of individual plots
+  plots <- map(1:nrow(metric_results), function(i) {
+    pair <- metric_results[i, ]
+    
+    # Prepare paired data
+    pair_data <- data %>%
+      filter(section_id %in% c(pair$section1, pair$section2)) %>%
+      select(Id, section_id, value = all_of(metric)) %>%
+      pivot_wider(
+        names_from = section_id,
+        values_from = value,
+        names_prefix = "Section "
+      ) %>%
+      na.omit()
+    
+    # Convert to long format for plotting
+    plot_data <- pair_data %>%
+      pivot_longer(
+        cols = -Id,
+        names_to = "section",
+        values_to = "value"
+      ) %>%
+      mutate(section = factor(sub("Section ", "", section)))
+    
+    # Create plot
+    ggplot(plot_data, aes(x = section, y = value)) +
+      geom_boxplot(aes(fill = section), width = 0.3, outlier.shape = NA, alpha = 0.8) +
+      geom_point(color = "gray40", size = 2.5, alpha = 0.7) +
+      geom_line(aes(group = Id), color = "gray60", alpha = 0.5) +
+      scale_fill_brewer(palette = "Set2") +  # ColorBrewer qualitative palette
+      labs(
+        title = paste("Comparison:", pair$comparison),
+        subtitle = paste0("Paired t-test: p = ", round(pair$p.value, 3)),
+        x = "Section",
+        y = ifelse(metric == "mean_heart_rate",
+                   "Mean Heart Rate (bpm)", 
+                   "Heart Rate Variability (RMSSD)"),
+        fill = "Section"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        legend.position = "right",
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "grey40")
+      )
+  })
+  
+  # Name plots by comparison
+  names(plots) <- metric_results$comparison
+  return(plots)
+}
 
+# Generate individual plots for mean heart rate
+meanhr_plots <- plot_individual_paired_comparisons(
+  data = results,
+  ttest_results = ttest_all_results,
+  metric = "mean_heart_rate"
+)
+
+# Generate individual plots for heart rate variability
+hrv_plots <- plot_individual_paired_comparisons(
+  data = results,
+  ttest_results = ttest_all_results,
+  metric = "heart_rate_variability"
+)
+
+# Access individual plots
+#hrv_plots[["1 vs 2"]]
+#hrv_plots[["3 vs 4"]]
+
+# Print all plots
+walk(names(meanhr_plots), ~print(meanhr_plots[[.x]]))
+walk(names(hrv_plots), ~print(hrv_plots[[.x]]))
 
 ```
