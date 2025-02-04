@@ -51,9 +51,9 @@ add_time_column <- function(data) {
 # Change 4 and 8 events which are repeated to 0 (i.e. If event column has 4, 4, 4 -> 4, 0, 0)
 clean_repeated_events <- function(data) {
   data %>%
-    arrange(Id, Time) %>%  # Ensure chronological order
     group_by(Id) %>%
     mutate(
+    arrange(Id, Time) %>%  # Ensure chronological order
       # Track time differences and event changes
       time_diff = Time - lag(Time, default = -Inf),
       event_changed = EVENT != lag(EVENT, default = first(EVENT)),
@@ -75,6 +75,20 @@ clean_repeated_events <- function(data) {
     ) %>%
     ungroup() %>%
     select(-time_diff, -event_changed, -cluster)  # Remove helper columns
+}
+
+clean_consecutive_rr <- function(data) {
+  data %>%
+    group_by(Id) %>%
+    arrange(Time) %>%
+    mutate(
+      `Clean R-R` = if_else(
+        row_number() == 1 | `ECG R-R` != lag(`ECG R-R`),
+        `ECG R-R`,
+        NA_real_
+      )
+    ) %>%
+    ungroup()
 }
 ```
 
@@ -163,8 +177,8 @@ data_base <- import_subjects_base()
 
 data_exp_processed <- process_all_subjects(data_exp)
 data_base_processed <- process_all_subjects(data_base)
-
-
+data_exp_processed <- clean_consecutive_rr(data_exp_processed)
+data_base_processed <- clean_consecutive_rr(data_base_processed)
 ```
 
 ## Investigating Events
@@ -223,32 +237,35 @@ filter_between_events <- function(data, start_event = 4, end_event = 8) {
     ungroup()
 }
 
+# Filter out points between events 4 and 8
+filtered_exp <- filter_between_events(data_exp_processed)
+
+
 # Calculating Mean Heart Rate and Heart Rate Variability in each section (between Event = 4 and Event = 8) for each subject
 results <- filtered_exp %>%
   filter(Id %in% 1:14, section_id %in% 1:4) %>%
-  # Arrange by time within each subject-section group
   group_by(Id, section_id) %>%
-  arrange(Time) %>%  
+  arrange(Time) %>%
   summarise(
-    # Calculate mean heart rate
     mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
     
-    # Calculate RMSSD for heart rate variability
-    heart_rate_variability = ifelse(
-      sum(!is.na(`ECG R-R`)) >= 2,  # Need at least 2 valid R-R intervals
-      sqrt(mean(diff(`ECG R-R`)^2, na.rm = TRUE)),  # RMSSD formula
-      NA_real_
-    ),
+    # Improved HRV calculation
+    heart_rate_variability = {
+      clean_rr <- na.omit(`Clean R-R`)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD from consecutive non-NA values
+      } else {
+        NA_real_
+      }
+    },
     .groups = "drop"
   ) %>%
-  # Clean up missing values
   mutate(
     mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
   )
 # View results sorted by Id and section
 results %>% arrange(Id, section_id)
 
-filtered_exp <- filter_between_events(data_exp_processed)
 
 # Uncomment below to see the 4 & 8 events picked out for a given subject Id
 #data_event <- data_exp_processed %>%
