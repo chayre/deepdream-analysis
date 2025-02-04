@@ -83,9 +83,9 @@ data_interpolated <- data %>%
 
 # Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
 # Also getting rid of values for which Luminosity = 0
-data_interpolated <- data_interpolated %>%
+data_interpolated <- data %>%
   mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
-  filter(Luminosity != 0)
+  filter(Luminosity != 0, Phase == "Video")
 
 # Uncomment to visually check first 50 data points to make sure interpolation is correct 
 head(data$LeftEyePupilSize, 50)
@@ -127,7 +127,7 @@ ggplot(data_interpolated, aes(x = ExperimentSecond, y = LeftEyePupilSize)) +
 ggplot(data_interpolated, aes(x = ExperimentSecond, y = RightEyePupilSize)) +
   # Add background rectangles for phases
   geom_rect(aes(xmin = ExperimentSecond, xmax = lead(ExperimentSecond, default = max(ExperimentSecond)),
-                ymin = -Inf, ymax = Inf, fill = Phase),
+                ymin = -Inf, ymax = Inf, fill = VideoName),
             color = NA, alpha = 0.3) +
   # Add black line for pupil size
   geom_line(color = "black") +
@@ -136,17 +136,17 @@ ggplot(data_interpolated, aes(x = ExperimentSecond, y = RightEyePupilSize)) +
     title = "Subject 2 Right Pupil Size During DayDream Experiment",
     x = "Time (seconds)",
     y = "Right Pupil Size",
-    fill = "Phase"
+    fill = "VideoName"
   ) +
   # Adjust fill colors for phases
-  scale_fill_manual(values = c(
-    "BeforeRecording" = "blue",
-    "Countdown" = "lightgreen",
-    "Recording" = "pink",
-    "SegmentFinished" = "yellow",
-    "UIFeedback" = "purple",
-    "Video" = "orange"
-  )) +
+  #scale_fill_manual(values = c(
+   # "BeforeRecording" = "blue",
+   # "Countdown" = "lightgreen",
+   # "Recording" = "pink",
+   # "SegmentFinished" = "yellow",
+   # "UIFeedback" = "purple",
+    #"Video" = "orange"
+  #)) +
   theme(legend.position = "bottom")
 
 # Reshape the data to long format for both pupil sizes
@@ -159,11 +159,11 @@ data_long <- data_interpolated %>%
   )
 
 # Plot both LeftEyePupilSize and RightEyePupilSize on the same chart
-ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
+ggplot(data, aes(x = ExperimentSecond, y = RightEyePupilSize, color = Eye)) +
   # Add background rectangles for phases
   geom_rect(aes(xmin = ExperimentSecond, 
                 xmax = lead(ExperimentSecond, default = max(ExperimentSecond)),
-                ymin = -Inf, ymax = Inf, fill = Phase),
+                ymin = -Inf, ymax = Inf, fill = VideoName),
             inherit.aes = FALSE, color = NA, alpha = 0.3) +
   # Add lines for pupil sizes
   geom_line(linewidth = 1) +
@@ -172,18 +172,18 @@ ggplot(data_long, aes(x = ExperimentSecond, y = PupilSize, color = Eye)) +
     title = "Subject 2 Pupil Sizes During DayDream Experiment",
     x = "Time (seconds)",
     y = "Pupil Size",
-    fill = "Phase",
+    fill = "VideoName",
     color = "Eye"
   ) +
   # Adjust fill colors for phases
-  scale_fill_manual(values = c(
-    "BeforeRecording" = "blue",
-    "Countdown" = "lightgreen",
-    "Recording" = "pink",
-    "SegmentFinished" = "yellow",
-    "UIFeedback" = "purple",
-    "Video" = "orange"
-  )) +
+  #scale_fill_manual(values = c(
+  #  "BeforeRecording" = "blue",
+   # "Countdown" = "lightgreen",
+   # "Recording" = "pink",
+   # "SegmentFinished" = "yellow",
+  ##  "UIFeedback" = "purple",
+  #  "Video" = "orange"
+ # )) +
   # Set line colors for Left and Right pupil sizes
   scale_color_manual(values = c(
     "LeftEyePupilSize" =  adjustcolor( "red", alpha.f = 0.5),
