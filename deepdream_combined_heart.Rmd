@@ -383,28 +383,102 @@ filter_between_events <- function(data, start_event = 4, end_event = 8) {
     ungroup()
 }
 
-# Calculating Mean Heart Rate in each section (between Event = 4 and Event = 8) for each subject
+# Calculating Mean Heart Rate and Heart Rate Variability in each section (between Event = 4 and Event = 8) for each subject
 results <- filtered_exp %>%
   filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  # Arrange by time within each subject-section group
   group_by(Id, section_id) %>%
+  arrange(Time) %>%  
   summarise(
+    # Calculate mean heart rate
     mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    
+    # Calculate RMSSD for heart rate variability
+    heart_rate_variability = ifelse(
+      sum(!is.na(`ECG R-R`)) >= 2,  # Need at least 2 valid R-R intervals
+      sqrt(mean(diff(`ECG R-R`)^2, na.rm = TRUE)),  # RMSSD formula
+      NA_real_
+    ),
     .groups = "drop"
+  ) %>%
+  # Clean up missing values
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
   )
-
 # View results sorted by Id and section
 results %>% arrange(Id, section_id)
 
-
-
-
 filtered_exp <- filter_between_events(data_exp_processed)
-summary(filtered_exp)
-table(filtered_exp$section_id)
 
-data_event <- data_exp_processed %>%
-  filter(Id == 2 & EVENT %in% c(4, 8)) 
+# Uncomment below to see the 4 & 8 events picked out for a given subject Id
+#data_event <- data_exp_processed %>%
+#  filter(Id == 2 & EVENT %in% c(4, 8)) 
+#data_event
 
-data_event
+```
+
+## Paired T-Test for Mean Heart Rate
+```{r}
+run_all_paired_ttests <- function(data) {
+  # Check required columns exist
+  required_cols <- c("Id", "section_id", "mean_heart_rate")
+  if (!all(required_cols %in% colnames(data))) {
+    stop("Input data must contain columns: ", paste(required_cols, collapse = ", "))
+  }
+  
+  # Get unique sections and create all possible pairs
+  sections <- sort(unique(data$section_id))
+  pairs <- as.data.frame(t(combn(sections, 2))) %>%
+    setNames(c("section1", "section2"))
+  
+  # Process each pair
+  results <- purrr::map_df(1:nrow(pairs), function(i) {
+    pair <- pairs[i, ]
+    
+    # Prepare paired data
+    paired_data <- data %>%
+      filter(section_id %in% c(pair$section1, pair$section2)) %>%
+      pivot_wider(
+        id_cols = Id,
+        names_from = section_id,
+        values_from = mean_heart_rate,
+        names_prefix = "section_"
+      ) %>%
+      na.omit()
+    
+    # Skip if insufficient data
+    if (nrow(paired_data) < 2) {
+      return(tibble(
+        comparison = paste(pair$section1, "vs", pair$section2),
+        message = "Insufficient data (n < 2)"
+      ))
+    }
+    
+    # Perform t-test
+    t.test(
+      paired_data[[paste0("section_", pair$section1)]],
+      paired_data[[paste0("section_", pair$section2)]],
+      paired = TRUE
+    ) %>%
+      broom::tidy() %>%
+      mutate(
+        comparison = paste(pair$section1, "vs", pair$section2),
+        n_pairs = nrow(paired_data),
+        .before = 1
+      )
+  })
+  
+  return(results)
+}
+
+# Execute
+ttest_all_results <- run_all_paired_ttests(results)
+print(ttest_all_results)
+
+```
+## Paired T-test for HRV
+
+```{r}
+
 
 ```
