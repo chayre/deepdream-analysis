@@ -29,18 +29,6 @@ library(rstatix)
 # Set working directory
 mds_dir <- here::here()
 
-#dataecg <- read.csv("C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ\\ID01_baseline.csv", sep=";")
-
-#dataecg
-#unique(dataecg$EVENT)
-#summary(dataecg)
-
-
-
-#dataecg[dataecg$Heart.Rate==0,]
-
-#file.exists("C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ\\ID01_baseline.csv")
-
 ```
 
 ## Defining Functions to Clean & Combine Data
@@ -52,7 +40,42 @@ remove_zero_heart_rate <- function(data) {
     filter(`Heart Rate` != 0)
 }
 
+# Add Time column (1000 rows = 1 second)
+add_time_column <- function(data) {
+  data %>%
+    group_by(Id) %>%
+    mutate(Time = (row_number() - 1) / 1000) %>%  # Convert row number to seconds
+    ungroup()
+}
 
+# Change 4 and 8 events which are repeated to 0 (i.e. If event column has 4, 4, 4 -> 4, 0, 0)
+clean_repeated_events <- function(data) {
+  data %>%
+    arrange(Id, Time) %>%  # Ensure chronological order
+    group_by(Id) %>%
+    mutate(
+      # Track time differences and event changes
+      time_diff = Time - lag(Time, default = -Inf),
+      event_changed = EVENT != lag(EVENT, default = first(EVENT)),
+      
+      # Identify new clusters of 4/8
+      cluster = cumsum(
+        (EVENT %in% c(4, 8) & (time_diff > 0.5 | event_changed)) |
+          !(EVENT %in% c(4, 8))
+      )
+    ) %>%
+    group_by(Id, cluster) %>%
+    mutate(
+      # Replace repeats with 0 within each cluster
+      EVENT = ifelse(
+        EVENT %in% c(4, 8) & row_number() > 1,
+        0,
+        EVENT
+      )
+    ) %>%
+    ungroup() %>%
+    select(-time_diff, -event_changed, -cluster)  # Remove helper columns
+}
 ```
 
 ## Load and Process All Subject Data
@@ -83,19 +106,6 @@ import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\
   return(data)
 }
 
-
-# Process with subject isolation
-process_all_subjects <- function(raw_data) {
-  raw_data %>%
-    group_by(Id) %>%
-    group_modify(~ {
-      .x %>%
-        remove_zero_heart_rate()
-    }) %>%
-    ungroup() %>%
-    arrange(Id)
-}
-
 import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
   # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
   file_list <- list.files(
@@ -120,14 +130,40 @@ import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding
   return(data)
 }
 
+process_all_subjects <- function(raw_data) {
+  # Clean column names
+  raw_data <- raw_data %>%
+    #rename_all(~str_trim(.) %>% make.names()) %>%  # Force valid column names
+    rename(Id = matches("^id$", ignore.case = TRUE)) %>%  # Explicitly rename ID column
+    mutate(Id = as.integer(Id))
+  
+  # Verify Id column exists
+  if (!"Id" %in% colnames(raw_data)) {
+    stop("Id column still missing after renaming. Columns found: ",
+         paste(colnames(raw_data), collapse = ", "))
+  }
+  
+  # Process using split-apply-combine
+  raw_data %>%
+    split(.$Id) %>%  # Base R splitting by Id
+    map_dfr(~ {
+      .x %>%
+        add_time_column() %>%
+        remove_zero_heart_rate() %>%
+        clean_repeated_events() %>%
+        mutate(Id = first(Id))  # Explicitly maintain Id column
+    }) %>%
+    arrange(Id)
+}
+
+
 # Execution
-data_exp <- process_all_subjects(import_subjects_exp())
-data_base <- process_all_subjects(import_subjects_base())
+data_exp <- import_subjects_exp()
+data_base <- import_subjects_base()
 
-unique(nozero$Id)
+data_exp_processed <- process_all_subjects(data_exp)
+data_base_processed <- process_all_subjects(data_base)
 
-# Import/process data
-#processed_device_combined <- import_subjects() %>% process_all_subjects()
 
 ```
 
@@ -228,34 +264,34 @@ plot_hr_hrv_paired <- function(hr_hrv_data) {
 
 
 # Example Usage:
-hr_hrv_data <- compute_hr_hrv(data_exp)  # Compute HR & HRV
-t_test_results <- paired_t_test(hr_hrv_data)  # Run paired t-tests
+#hr_hrv_data <- compute_hr_hrv(data_exp)  # Compute HR & HRV
+#t_test_results <- paired_t_test(hr_hrv_data)  # Run paired t-tests
 
 # View results
-t_test_results
+#t_test_results
 
 
 # Example Usage:
-paired_plots <- plot_hr_hrv_paired(hr_hrv_data)
+#paired_plots <- plot_hr_hrv_paired(hr_hrv_data)
 
 # Display plots
-print(paired_plots$HR_0_vs_1)
-print(paired_plots$HR_0_vs_2)
-print(paired_plots$HR_1_vs_2)
+#print(paired_plots$HR_0_vs_1)
+#print(paired_plots$HR_0_vs_2)
+#print(paired_plots$HR_1_vs_2)
 
-print(paired_plots$HRV_0_vs_1)
-print(paired_plots$HRV_0_vs_2)
-print(paired_plots$HRV_1_vs_2)
+#print(paired_plots$HRV_0_vs_1)
+#print(paired_plots$HRV_0_vs_2)
+#print(paired_plots$HRV_1_vs_2)
 
-hr_hrv_data
+#hr_hrv_data
 
-unique(nozero$EVENT)
+#unique(nozero$EVENT)
 
-nozero$`ECG B, X, ECG2-R`
+#nozero$`ECG B, X, ECG2-R`
 
 
-filtered_data <- nozero[nozero$Id == 3, ]
-id_filtered <- filtered_data[filtered_data$EVENT == 4, ]
+#filtered_data <- nozero[nozero$Id == 3, ]
+#id_filtered <- filtered_data[filtered_data$EVENT == 4, ]
 
 
 #summary(nozero$`ECG R-R`)
@@ -294,18 +330,81 @@ print(event_counts)
 
 
 
-# Filter data for Id = 1
-subject_data <- data_exp %>% filter(Id == 1)
+plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
+  # Filter data for the given Id and remove EVENT = 0
+  subject_data <- data %>% 
+    filter(Id == subject_id, EVENT != 0)
+  
+  # Create the plot
+  ggplot(subject_data, aes(x = seq_along(EVENT), y = EVENT)) +
+    geom_point(color = "red", size = 1, alpha = 0.7) +  # Add points
+    labs(
+      title = paste("EVENT by Frame for Id =", subject_id),
+      x = "Frame (Index)",
+      y = "EVENT"
+    ) +
+    theme_minimal()
+}
 
-# Create the plot
-ggplot(subject_data, aes(x = seq_along(EVENT), y = EVENT)) +
-  geom_point(color = "red", size = 1, alpha = 0.7) +  # Add points
+# Execution
+map(1:14, plot_event_by_frame)  # Loop through Ids 1-14
 
-  labs(
-    title = "EVENT by Frame for Id = 1",
-    x = "Frame (Index)",
-    y = "EVENT"
-  ) +
-  theme_minimal()
+
+
+```
+
+## Looking Between Events 4 and 8 for Experimental Data
+
+```{r}
+# In the experimental data, Subject 2, there is a random event 4 at the start of the data which does not correlate to an event 8 (the next event 8 happens ~1000 seconds later). I'm filtering this out.
+data_exp_processed <- data_exp_processed %>%
+  mutate(
+    EVENT = if_else(
+      Id == 2 & Time == 1.531,  # Match time with tolerance for precision
+      0,  # Replace EVENT with 0
+      EVENT  # Keep original value otherwise
+    )
+  )
+
+# Select only points between events 4 and 8
+filter_between_events <- function(data, start_event = 4, end_event = 8) {
+  data %>%
+    group_by(Id) %>%
+    mutate(
+      start_flag = EVENT == start_event,  # Mark start points
+      end_flag = EVENT == end_event       # Mark end points
+    ) %>%
+    mutate(
+      section_id = cumsum(start_flag),  # Track sections where EVENT == 4 starts
+      valid_section = section_id > lag(cumsum(end_flag), default = 0)  # Ensure pairing
+    ) %>%
+    filter(valid_section) %>%
+    select(-start_flag, -end_flag, -valid_section) %>%
+    ungroup()
+}
+
+# Calculating Mean Heart Rate in each section (between Event = 4 and Event = 8) for each subject
+results <- filtered_exp %>%
+  filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  group_by(Id, section_id) %>%
+  summarise(
+    mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View results sorted by Id and section
+results %>% arrange(Id, section_id)
+
+
+
+
+filtered_exp <- filter_between_events(data_exp_processed)
+summary(filtered_exp)
+table(filtered_exp$section_id)
+
+data_event <- data_exp_processed %>%
+  filter(Id == 2 & EVENT %in% c(4, 8)) 
+
+data_event
 
 ```
