@@ -421,54 +421,56 @@ filtered_exp <- filter_between_events(data_exp_processed)
 ```{r}
 run_all_paired_ttests <- function(data) {
   # Check required columns exist
-  required_cols <- c("Id", "section_id", "mean_heart_rate")
+  required_cols <- c("Id", "section_id", "mean_heart_rate", "heart_rate_variability")
   if (!all(required_cols %in% colnames(data))) {
-    stop("Input data must contain columns: ", paste(required_cols, collapse = ", "))
+    stop("Missing required columns. Needed: ", paste(required_cols, collapse = ", "))
   }
   
-  # Get unique sections and create all possible pairs
+  # Create all possible section pairs
   sections <- sort(unique(data$section_id))
   pairs <- as.data.frame(t(combn(sections, 2))) %>%
     setNames(c("section1", "section2"))
   
-  # Process each pair
-  results <- purrr::map_df(1:nrow(pairs), function(i) {
-    pair <- pairs[i, ]
-    
-    # Prepare paired data
-    paired_data <- data %>%
-      filter(section_id %in% c(pair$section1, pair$section2)) %>%
-      pivot_wider(
-        id_cols = Id,
-        names_from = section_id,
-        values_from = mean_heart_rate,
-        names_prefix = "section_"
+  # Process both metrics
+  purrr::map_df(c("mean_heart_rate", "heart_rate_variability"), function(metric) {
+    purrr::map_df(1:nrow(pairs), function(i) {
+      pair <- pairs[i, ]
+      
+      # Prepare paired data for current metric
+      paired_data <- data %>%
+        filter(section_id %in% c(pair$section1, pair$section2)) %>%
+        pivot_wider(
+          id_cols = Id,
+          names_from = section_id,
+          values_from = all_of(metric),
+          names_prefix = "section_"
+        ) %>%
+        na.omit()
+      
+      # Skip if insufficient data
+      if (nrow(paired_data) < 2) {
+        return(tibble(
+          metric = metric,
+          comparison = paste(pair$section1, "vs", pair$section2),
+          message = "Insufficient data (n < 2)"
+        ))
+      }
+      
+      # Perform t-test
+      t.test(
+        paired_data[[paste0("section_", pair$section1)]],
+        paired_data[[paste0("section_", pair$section2)]],
+        paired = TRUE
       ) %>%
-      na.omit()
-    
-    # Skip if insufficient data
-    if (nrow(paired_data) < 2) {
-      return(tibble(
-        comparison = paste(pair$section1, "vs", pair$section2),
-        message = "Insufficient data (n < 2)"
-      ))
-    }
-    
-    # Perform t-test
-    t.test(
-      paired_data[[paste0("section_", pair$section1)]],
-      paired_data[[paste0("section_", pair$section2)]],
-      paired = TRUE
-    ) %>%
-      broom::tidy() %>%
-      mutate(
-        comparison = paste(pair$section1, "vs", pair$section2),
-        n_pairs = nrow(paired_data),
-        .before = 1
-      )
+        broom::tidy() %>%
+        mutate(
+          metric = metric,
+          comparison = paste(pair$section1, "vs", pair$section2),
+          n_pairs = nrow(paired_data),
+          .before = 1
+        )
+    })
   })
-  
-  return(results)
 }
 
 # Execute
