@@ -29,66 +29,29 @@ library(rstatix)
 # Set working directory
 mds_dir <- here::here()
 
-dataecg <- read.csv("/pre-study/ECG/ACQ/ID01_baseline.csv")
+#dataecg <- read.csv("C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ\\ID01_baseline.csv", sep=";")
 
-file.exists("/pre-study/ECG/ACQ/ID01_baseline.csv")
+#dataecg
+#unique(dataecg$EVENT)
+#summary(dataecg)
+
+
+
+#dataecg[dataecg$Heart.Rate==0,]
+
+#file.exists("C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ\\ID01_baseline.csv")
 
 ```
 
 ## Defining Functions to Clean & Combine Data
 
 ```{r}
-# Splitting Vectors into Directional Components
-split_eye_direction <- function(data) {
-  data %>%
-    mutate(
-      # Remove parentheses and split into components
-      values = strsplit(gsub("[()]", "", CombinedEyeDirection), ","),
-      # Extract numeric values for each dimension
-      CombinedEyeDirectionX = sapply(values, function(x) as.numeric(x[1])),
-      CombinedEyeDirectionY = sapply(values, function(x) as.numeric(x[2])),
-      CombinedEyeDirectionZ = sapply(values, function(x) as.numeric(x[3])),
-      # Remove temporary values column
-      .keep = "unused"
-    )
+# Remove rows for which Heart Rate is 0
+remove_zero_heart_rate <- function(data) {
+  data %>% 
+    filter(`Heart Rate` != 0)
 }
 
-# While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
-# Interpolate blinking values
-interpolate_blinking <- function(data) {
-  data %>%
-    # Replace invalid values with NA
-    mutate(
-      LeftEyePupilSize = ifelse(LeftEyePupilSize < 0, NA, LeftEyePupilSize),
-      RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize),
-      CombinedEyeDirectionX = ifelse(CombinedEyeDirectionX < -0.98, NA, CombinedEyeDirectionX),
-      CombinedEyeDirectionY = ifelse(CombinedEyeDirectionY < -0.98, NA, CombinedEyeDirectionY),
-      CombinedEyeDirectionZ = ifelse(CombinedEyeDirectionZ < -0.98, NA, CombinedEyeDirectionZ)
-    ) %>%
-    # Linear interpolation for missing values
-    mutate(
-      across(c(LeftEyePupilSize, RightEyePupilSize, 
-               CombinedEyeDirectionX, CombinedEyeDirectionY, CombinedEyeDirectionZ),
-             ~ zoo::na.approx(., na.rm = FALSE))
-    ) %>%
-    # Fill leading/trailing NAs using last observation carried forward/backward
-    mutate(
-      LeftEyePupilSize = zoo::na.locf(zoo::na.locf(LeftEyePupilSize, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
-      RightEyePupilSize = zoo::na.locf(zoo::na.locf(RightEyePupilSize, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
-      CombinedEyeDirectionX = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
-      CombinedEyeDirectionY = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
-      CombinedEyeDirectionZ = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE)
-    )
-}
-
-# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
-# Also getting rid of values for which Luminosity = 0
-clean_phase_luminosity <- function(data) {
-  # Perform cleaning operations
-  data %>%
-    mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
-    filter(Luminosity != 0)
-}
 
 ```
 
@@ -96,23 +59,28 @@ clean_phase_luminosity <- function(data) {
 
 ```{r warning=FALSE, message=FALSE}
 # Import data
-import_subjects <- function(data_dir = "pre-study\ECG\ACQ") {
-  # Get list of all device data files
+import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
+  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
   file_list <- list.files(
     path = here(data_dir),
-    pattern = "\\d+_Experiment\\.csv",
+    pattern = "\\d+_experiment\\.csv",
     full.names = TRUE
   )
-  
-  # Read and combine files with semicolon separation
-  map_df(file_list, ~ {
+
+  # Read and combine all files
+  data <- map_df(file_list, ~ {
     read_delim(.x, 
               delim = ";",
               col_types = cols(.default = col_character()),
-              show_col_types = FALSE) %>% 
+              show_col_types = FALSE) %>%
+      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
       type_convert()  # Automatically convert columns to appropriate types
-  }) %>%
-    arrange(Id)  # Proper numeric sorting
+  })
+
+  # Arrange by subject ID
+  data <- data %>% arrange(Id)
+
+  return(data)
 }
 
 
@@ -122,16 +90,222 @@ process_all_subjects <- function(raw_data) {
     group_by(Id) %>%
     group_modify(~ {
       .x %>%
-        clean_phase_luminosity() %>%
-        split_eye_direction() %>%
-        interpolate_blinking()
+        remove_zero_heart_rate()
     }) %>%
     ungroup() %>%
-    arrange(Id, ExperimentSecond)
+    arrange(Id)
 }
 
+import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
+  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "ID\\d+_baseline\\.csv",
+    full.names = TRUE
+  )
+
+  # Read and combine all files
+  data <- map_df(file_list, ~ {
+    read_delim(.x, 
+              delim = ";",
+              col_types = cols(.default = col_character()),
+              show_col_types = FALSE) %>%
+      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
+      type_convert()  # Automatically convert columns to appropriate types
+  })
+
+  # Arrange by subject ID
+  data <- data %>% arrange(Id)
+
+  return(data)
+}
+
+# Execution
+data_exp <- process_all_subjects(import_subjects_exp())
+data_base <- process_all_subjects(import_subjects_base())
+
+unique(nozero$Id)
+
 # Import/process data
-processed_device_combined <- import_subjects() %>% process_all_subjects()
+#processed_device_combined <- import_subjects() %>% process_all_subjects()
 
 ```
 
+## ECG Statistical Testing Between Events
+
+```{r}
+
+calculate_sdnn <- function(rr_intervals) {
+  sd(rr_intervals, na.rm = TRUE)
+}
+
+calculate_rmssd <- function(rr_intervals) {
+  rr_diffs <- diff(rr_intervals)  # Compute successive differences
+  sqrt(mean(rr_diffs^2, na.rm = TRUE))  # Root mean square
+}
+
+summarydata <- data_exp %>%
+  group_by(Id, EVENT) %>%
+  summarise(
+    Mean_HR = mean(`Heart Rate`, na.rm = TRUE),  # Average Heart Rate
+    HRV_SDNN = calculate_sdnn(`ECG R-R`),
+    HRV_RMSSD = calculate_rmssd(`ECG R-R`)
+  ) %>%
+  ungroup()
+
+summary(summarydata$HRV_SDNN)
+summary(summarydata$HRV_RMSSD)
+
+summarydata
+
+
+# Function to compute Mean HR and HRV (SDNN) for subjects 1-14 in events 0, 1, or 2
+compute_hr_hrv <- function(data) {
+  data %>%
+    filter(Id %in% 1:14, EVENT %in% c(0, 1, 2)) %>%
+    group_by(Id, EVENT) %>%
+    summarise(
+      Mean_HR = mean(`Heart Rate`, na.rm = TRUE),
+      HRV_SDNN = sd(`ECG R-R`, na.rm = TRUE),  # Standard deviation of RR intervals
+      .groups = "drop"
+    )
+}
+
+# Function to plot paired boxplots with p-values and connecting lines
+plot_hr_hrv_paired <- function(hr_hrv_data) {
+  plots <- list()
+  
+  # Define event pairs for comparison
+  event_pairs <- list(c(0, 1), c(0, 2), c(1, 2))
+  
+  for (pair in event_pairs) {
+    df_pair <- hr_hrv_data %>% 
+      filter(EVENT %in% pair) %>%
+      select(Id, EVENT, Mean_HR, HRV_SDNN) %>%
+      pivot_wider(names_from = EVENT, values_from = c(Mean_HR, HRV_SDNN))  # Convert to wide format
+
+    # Paired t-tests
+    hr_test <- t.test(df_pair[[paste0("Mean_HR_", pair[1])]], 
+                      df_pair[[paste0("Mean_HR_", pair[2])]], 
+                      paired = TRUE, na.action = na.omit)
+
+    hrv_test <- t.test(df_pair[[paste0("HRV_SDNN_", pair[1])]], 
+                       df_pair[[paste0("HRV_SDNN_", pair[2])]], 
+                       paired = TRUE, na.action = na.omit)
+
+    # Convert back to long format for boxplots with connecting lines
+    df_long <- hr_hrv_data %>% filter(EVENT %in% pair)
+
+    # Boxplot for HR with connecting lines
+    p_hr <- ggplot(df_long, aes(x = factor(EVENT), y = Mean_HR, fill = factor(EVENT))) +
+      geom_boxplot(alpha = 0.6) +
+      geom_line(aes(group = Id), color = "gray50", alpha = 0.5) +  # Add connecting lines
+      geom_point(aes(color = "gray50"), alpha = 0.5, show.legend = FALSE) +  # Add points for clarity
+      labs(title = paste("Heart Rate (HR): EVENT", pair[1], "vs.", pair[2]), 
+           x = "EVENT", y = "Mean HR (bpm)") +
+      theme_minimal() +
+      annotate("text", x = 1.5, y = max(df_long$Mean_HR, na.rm = TRUE), 
+               label = paste("p =", signif(hr_test$p.value, 3)), size = 5)
+
+    # Boxplot for HRV with connecting lines
+    p_hrv <- ggplot(df_long, aes(x = factor(EVENT), y = HRV_SDNN, fill = factor(EVENT))) +
+      geom_boxplot(alpha = 0.6) +
+      geom_line(aes(group = Id), color = "gray50", alpha = 0.5) +  # Add connecting lines
+      geom_point(aes(color = "gray50"), alpha = 0.5, show.legend = FALSE) +  # Add points for clarity
+      labs(title = paste("Heart Rate Variability (HRV): EVENT", pair[1], "vs.", pair[2]), 
+           x = "EVENT", y = "HRV (SDNN, ms)") +
+      theme_minimal() +
+      annotate("text", x = 1.5, y = max(df_long$HRV_SDNN, na.rm = TRUE), 
+               label = paste("p =", signif(hrv_test$p.value, 3)), size = 5)
+
+    # Store plots
+    plots[[paste0("HR_", pair[1], "_vs_", pair[2])]] <- p_hr
+    plots[[paste0("HRV_", pair[1], "_vs_", pair[2])]] <- p_hrv
+  }
+  
+  return(plots)
+}
+
+
+# Example Usage:
+hr_hrv_data <- compute_hr_hrv(data_exp)  # Compute HR & HRV
+t_test_results <- paired_t_test(hr_hrv_data)  # Run paired t-tests
+
+# View results
+t_test_results
+
+
+# Example Usage:
+paired_plots <- plot_hr_hrv_paired(hr_hrv_data)
+
+# Display plots
+print(paired_plots$HR_0_vs_1)
+print(paired_plots$HR_0_vs_2)
+print(paired_plots$HR_1_vs_2)
+
+print(paired_plots$HRV_0_vs_1)
+print(paired_plots$HRV_0_vs_2)
+print(paired_plots$HRV_1_vs_2)
+
+hr_hrv_data
+
+unique(nozero$EVENT)
+
+nozero$`ECG B, X, ECG2-R`
+
+
+filtered_data <- nozero[nozero$Id == 3, ]
+id_filtered <- filtered_data[filtered_data$EVENT == 4, ]
+
+
+#summary(nozero$`ECG R-R`)
+#table(nozero$`ECG R-R`)  # Check for unexpected 0 values
+
+
+
+# Create the plot
+ggplot(filtered_data, aes(x = seq_along(`ECG B, X, ECG2-R`), y = `ECG B, X, ECG2-R`)) +
+  geom_line(color = "blue") +  # Plot ECG data
+  #geom_point(color = "red", size = 1, alpha = 0.7) +  # Mark points
+
+  # Add background shading for different EVENTS
+  geom_rect(aes(xmin = seq_along(`ECG B, X, ECG2-R`), 
+                xmax = seq_along(`ECG B, X, ECG2-R`), 
+                ymin = -Inf, ymax = Inf, 
+                fill = as.factor(EVENT)), 
+            alpha = 0.1) +  # Transparency
+  
+  #scale_fill_manual(values = c("0" = "gray90", "1" = "lightblue", "2" = "lightgreen")) +  # Event colors
+  labs(title = "ECG B, X, ECG2-R for Subject 1",
+       x = "Index", 
+       y = "ECG Signal",
+       fill = "EVENT") +  
+  theme_minimal()
+
+
+event_counts <- data_exp %>%
+  group_by(Id, EVENT) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Print table
+print(event_counts)
+
+
+
+
+
+# Filter data for Id = 1
+subject_data <- data_exp %>% filter(Id == 1)
+
+# Create the plot
+ggplot(subject_data, aes(x = seq_along(EVENT), y = EVENT)) +
+  geom_point(color = "red", size = 1, alpha = 0.7) +  # Add points
+
+  labs(
+    title = "EVENT by Frame for Id = 1",
+    x = "Frame (Index)",
+    y = "EVENT"
+  ) +
+  theme_minimal()
+
+```
