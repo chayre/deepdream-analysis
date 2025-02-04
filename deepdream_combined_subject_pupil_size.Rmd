@@ -1,5 +1,5 @@
 ---
-title: "DeepDream - Subject 2 Physiological Analysis"
+title: "DeepDream - Subjects Combined Eye-Tracking Data Analysis"
 author:    |
     | Colin Ayres  
     | c.ayres@student.uw.edu.pl

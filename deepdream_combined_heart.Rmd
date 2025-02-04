@@ -1,9 +1,9 @@
 ---
-title: "DeepDream - Subject 2 Physiological Analysis"
+title: "DeepDream - Subjects Combined ECG Analysis"
 author:    |
     | Colin Ayres  
     | c.ayres@student.uw.edu.pl
-date: "January 2025"
+date: "February 2025"
 output: html_document
 chunk_output_type: console
 ---
