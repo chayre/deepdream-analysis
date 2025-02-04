@@ -1,0 +1,137 @@
+---
+title: "DeepDream - Subject 2 Physiological Analysis"
+author:    |
+    | Colin Ayres  
+    | c.ayres@student.uw.edu.pl
+date: "January 2025"
+output: html_document
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages
+
+```{r warning=FALSE, message=FALSE}
+# Load necessary packages
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(zoo)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+library(ggpubr)
+library(rstatix)
+
+# Set working directory
+mds_dir <- here::here()
+
+dataecg <- read.csv("/pre-study/ECG/ACQ/ID01_baseline.csv")
+
+file.exists("/pre-study/ECG/ACQ/ID01_baseline.csv")
+
+```
+
+## Defining Functions to Clean & Combine Data
+
+```{r}
+# Splitting Vectors into Directional Components
+split_eye_direction <- function(data) {
+  data %>%
+    mutate(
+      # Remove parentheses and split into components
+      values = strsplit(gsub("[()]", "", CombinedEyeDirection), ","),
+      # Extract numeric values for each dimension
+      CombinedEyeDirectionX = sapply(values, function(x) as.numeric(x[1])),
+      CombinedEyeDirectionY = sapply(values, function(x) as.numeric(x[2])),
+      CombinedEyeDirectionZ = sapply(values, function(x) as.numeric(x[3])),
+      # Remove temporary values column
+      .keep = "unused"
+    )
+}
+
+# While blinking, pupil values are recorded as negative. I replace negative values with interpolated values below. For example, (5, -3, -2, -4, 9) will become (5, 6, 7, 8, 9).
+# Interpolate blinking values
+interpolate_blinking <- function(data) {
+  data %>%
+    # Replace invalid values with NA
+    mutate(
+      LeftEyePupilSize = ifelse(LeftEyePupilSize < 0, NA, LeftEyePupilSize),
+      RightEyePupilSize = ifelse(RightEyePupilSize < 0, NA, RightEyePupilSize),
+      CombinedEyeDirectionX = ifelse(CombinedEyeDirectionX < -0.98, NA, CombinedEyeDirectionX),
+      CombinedEyeDirectionY = ifelse(CombinedEyeDirectionY < -0.98, NA, CombinedEyeDirectionY),
+      CombinedEyeDirectionZ = ifelse(CombinedEyeDirectionZ < -0.98, NA, CombinedEyeDirectionZ)
+    ) %>%
+    # Linear interpolation for missing values
+    mutate(
+      across(c(LeftEyePupilSize, RightEyePupilSize, 
+               CombinedEyeDirectionX, CombinedEyeDirectionY, CombinedEyeDirectionZ),
+             ~ zoo::na.approx(., na.rm = FALSE))
+    ) %>%
+    # Fill leading/trailing NAs using last observation carried forward/backward
+    mutate(
+      LeftEyePupilSize = zoo::na.locf(zoo::na.locf(LeftEyePupilSize, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
+      RightEyePupilSize = zoo::na.locf(zoo::na.locf(RightEyePupilSize, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
+      CombinedEyeDirectionX = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionX, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
+      CombinedEyeDirectionY = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionY, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE),
+      CombinedEyeDirectionZ = zoo::na.locf(zoo::na.locf(CombinedEyeDirectionZ, na.rm = FALSE, fromLast = TRUE), na.rm = FALSE)
+    )
+}
+
+# Getting rid of "Countdown" (It takes 2 seconds and only appears in one of the conditions, messes up legend)
+# Also getting rid of values for which Luminosity = 0
+clean_phase_luminosity <- function(data) {
+  # Perform cleaning operations
+  data %>%
+    mutate(Phase = ifelse(Phase == "Countdown", "BeforeRecording", Phase)) %>%
+    filter(Luminosity != 0)
+}
+
+```
+
+## Load and Process All Subject Data
+
+```{r warning=FALSE, message=FALSE}
+# Import data
+import_subjects <- function(data_dir = "pre-study\ECG\ACQ") {
+  # Get list of all device data files
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "\\d+_Experiment\\.csv",
+    full.names = TRUE
+  )
+  
+  # Read and combine files with semicolon separation
+  map_df(file_list, ~ {
+    read_delim(.x, 
+              delim = ";",
+              col_types = cols(.default = col_character()),
+              show_col_types = FALSE) %>% 
+      type_convert()  # Automatically convert columns to appropriate types
+  }) %>%
+    arrange(Id)  # Proper numeric sorting
+}
+
+
+# Process with subject isolation
+process_all_subjects <- function(raw_data) {
+  raw_data %>%
+    group_by(Id) %>%
+    group_modify(~ {
+      .x %>%
+        clean_phase_luminosity() %>%
+        split_eye_direction() %>%
+        interpolate_blinking()
+    }) %>%
+    ungroup() %>%
+    arrange(Id, ExperimentSecond)
+}
+
+# Import/process data
+processed_device_combined <- import_subjects() %>% process_all_subjects()
+
+```
+
