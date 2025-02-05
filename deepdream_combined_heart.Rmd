@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Import Packages
 
 ```{r warning=FALSE, message=FALSE}
-# Load necessary packages
+# Load packages
 library(tidyverse)
 library(here)
 library(ggplot2)
@@ -25,6 +25,7 @@ library(patchwork)
 library(mgcv)
 library(ggpubr)
 library(rstatix)
+library(readr)
 
 # Set working directory
 mds_dir <- here::here()
@@ -181,6 +182,39 @@ data_exp_processed <- clean_consecutive_rr(data_exp_processed)
 data_base_processed <- clean_consecutive_rr(data_base_processed)
 ```
 
+## Pulling out Condition Orders for each Subject
+
+```{r}
+# Define file paths
+file_paths <- list.files(path = "pre-study", pattern = "_QuestionsData.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+questions_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+condensed_questions_combined <- questions_combined %>%
+  select(Id, VideoName, VideoMode, QuestionIndex, QuestionAnswer) %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName),
+    QuestionIndex = as.factor(QuestionIndex)
+  )
+
+processed_questions_combined <- condensed_questions_combined %>%
+  group_by(Id) %>%
+  arrange(Id, row_number()) %>%
+  mutate(Order = paste(VideoMode, Condition, sep = "_")) %>%
+  summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
+  unnest_longer(Condition_Order) %>%
+  group_by(Id) %>%
+  mutate(Order_Number = row_number())
+
+```
+
 ## Investigating Events
 
 ```{r}
@@ -266,6 +300,9 @@ results <- filtered_exp %>%
 # View results sorted by Id and section
 results %>% arrange(Id, section_id)
 
+# Join results table with the condensed data to include condition names
+linked_results <- results %>%
+  left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
 
 # Uncomment below to see the 4 & 8 events picked out for a given subject Id
 #data_event <- data_exp_processed %>%
@@ -276,53 +313,54 @@ results %>% arrange(Id, section_id)
 
 ## Paired T-Test for Mean Heart Rate
 ```{r}
+# Function to run paired t-tests for all combinations of conditions
 run_all_paired_ttests <- function(data) {
   # Check required columns exist
-  required_cols <- c("Id", "section_id", "mean_heart_rate", "heart_rate_variability")
+  required_cols <- c("Id", "Condition_Order", "mean_heart_rate", "heart_rate_variability")
   if (!all(required_cols %in% colnames(data))) {
     stop("Missing required columns. Needed: ", paste(required_cols, collapse = ", "))
   }
-  
-  # Create all possible section pairs
-  sections <- sort(unique(data$section_id))
-  pairs <- as.data.frame(t(combn(sections, 2))) %>%
-    setNames(c("section1", "section2"))
-  
+
+  # Create all possible condition pairs
+  conditions <- unique(data$Condition_Order)
+  pairs <- as.data.frame(t(combn(conditions, 2))) %>%
+    setNames(c("condition1", "condition2"))
+
   # Process both metrics
   purrr::map_df(c("mean_heart_rate", "heart_rate_variability"), function(metric) {
     purrr::map_df(1:nrow(pairs), function(i) {
       pair <- pairs[i, ]
-      
+
       # Prepare paired data for current metric
       paired_data <- data %>%
-        filter(section_id %in% c(pair$section1, pair$section2)) %>%
+        filter(Condition_Order %in% c(pair$condition1, pair$condition2)) %>%
         pivot_wider(
           id_cols = Id,
-          names_from = section_id,
+          names_from = Condition_Order,
           values_from = all_of(metric),
-          names_prefix = "section_"
+          names_prefix = "condition_"
         ) %>%
         na.omit()
-      
+
       # Skip if insufficient data
       if (nrow(paired_data) < 2) {
         return(tibble(
           metric = metric,
-          comparison = paste(pair$section1, "vs", pair$section2),
+          comparison = paste(pair$condition1, "vs", pair$condition2),
           message = "Insufficient data (n < 2)"
         ))
       }
-      
+
       # Perform t-test
       t.test(
-        paired_data[[paste0("section_", pair$section1)]],
-        paired_data[[paste0("section_", pair$section2)]],
+        paired_data[[paste0("condition_", pair$condition1)]],
+        paired_data[[paste0("condition_", pair$condition2)]],
         paired = TRUE
       ) %>%
         broom::tidy() %>%
         mutate(
           metric = metric,
-          comparison = paste(pair$section1, "vs", pair$section2),
+          comparison = paste(pair$condition1, "vs", pair$condition2),
           n_pairs = nrow(paired_data),
           .before = 1
         )
@@ -331,8 +369,8 @@ run_all_paired_ttests <- function(data) {
 }
 
 # Execute
-ttest_all_results <- run_all_paired_ttests(results)
-print(ttest_all_results)
+paired_ttest_results <- run_all_paired_ttests(linked_results)
+print(paired_ttest_results)
 
 ```
 ## Plotting Paired T-test Results
@@ -343,8 +381,8 @@ plot_individual_paired_comparisons <- function(data, ttest_results, metric = "me
   metric_results <- ttest_results %>%
     filter(metric == !!metric) %>%
     mutate(
-      section1 = as.numeric(sub(" vs.*", "", comparison)),
-      section2 = as.numeric(sub(".*vs ", "", comparison))
+      condition1 = sub(" vs.*", "", comparison),
+      condition2 = sub(".*vs ", "", comparison)
     )
   
   # Create list of individual plots
@@ -353,12 +391,12 @@ plot_individual_paired_comparisons <- function(data, ttest_results, metric = "me
     
     # Prepare paired data
     pair_data <- data %>%
-      filter(section_id %in% c(pair$section1, pair$section2)) %>%
-      select(Id, section_id, value = all_of(metric)) %>%
+      filter(Condition_Order %in% c(pair$condition1, pair$condition2)) %>%
+      select(Id, Condition_Order, value = all_of(metric)) %>%
       pivot_wider(
-        names_from = section_id,
+        names_from = Condition_Order,
         values_from = value,
-        names_prefix = "Section "
+        names_prefix = "Condition_"
       ) %>%
       na.omit()
     
@@ -366,25 +404,25 @@ plot_individual_paired_comparisons <- function(data, ttest_results, metric = "me
     plot_data <- pair_data %>%
       pivot_longer(
         cols = -Id,
-        names_to = "section",
+        names_to = "Condition",
         values_to = "value"
       ) %>%
-      mutate(section = factor(sub("Section ", "", section)))
+      mutate(Condition = factor(sub("Condition_", "", Condition)))
     
     # Create plot
-    ggplot(plot_data, aes(x = section, y = value)) +
-      geom_boxplot(aes(fill = section), width = 0.3, outlier.shape = NA, alpha = 0.8) +
+    ggplot(plot_data, aes(x = Condition, y = value)) +
+      geom_boxplot(aes(fill = Condition), width = 0.3, outlier.shape = NA, alpha = 0.8) +
       geom_point(color = "gray40", size = 2.5, alpha = 0.7) +
       geom_line(aes(group = Id), color = "gray60", alpha = 0.5) +
       scale_fill_brewer(palette = "Set2") +  # ColorBrewer qualitative palette
       labs(
         title = paste("Comparison:", pair$comparison),
         subtitle = paste0("Paired t-test: p = ", round(pair$p.value, 3)),
-        x = "Section",
+        x = "Condition",
         y = ifelse(metric == "mean_heart_rate",
                    "Mean Heart Rate (bpm)", 
                    "Heart Rate Variability (RMSSD)"),
-        fill = "Section"
+        fill = "Condition"
       ) +
       theme_minimal(base_size = 14) +
       theme(
@@ -402,21 +440,17 @@ plot_individual_paired_comparisons <- function(data, ttest_results, metric = "me
 
 # Generate individual plots for mean heart rate
 meanhr_plots <- plot_individual_paired_comparisons(
-  data = results,
-  ttest_results = ttest_all_results,
+  data = linked_results,
+  ttest_results = paired_ttest_results,
   metric = "mean_heart_rate"
 )
 
 # Generate individual plots for heart rate variability
 hrv_plots <- plot_individual_paired_comparisons(
-  data = results,
-  ttest_results = ttest_all_results,
+  data = linked_results,
+  ttest_results = paired_ttest_results,
   metric = "heart_rate_variability"
 )
-
-# Access individual plots
-#hrv_plots[["1 vs 2"]]
-#hrv_plots[["3 vs 4"]]
 
 # Print all plots
 walk(names(meanhr_plots), ~print(meanhr_plots[[.x]]))
