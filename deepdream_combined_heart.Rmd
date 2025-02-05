@@ -493,4 +493,87 @@ subject_plots <- filtered_exp_synced %>%
 # View all plots
 walk(subject_plots, print) 
 
+
+
+```
+## Identifying Outliers
+
+```{r}
+
+
+
+mad_score <- function(x, threshold = 3.5) {
+  median_x <- median(x)
+  mad_x <- mad(x)
+  z_scores <- abs(x - median_x) / mad_x
+  return(z_scores > threshold)
+}
+
+# Add MAD outliers and thresholds to data
+filtered_exp_annotated <- filtered_exp_synced %>%
+  group_by(Id, Condition_Order) %>%
+  mutate(
+    median_rr = median(`Clean R-R`, na.rm = TRUE),
+    mad_threshold = 3.5 * mad(`Clean R-R`, na.rm = TRUE),
+    is_outlier = mad_score(`Clean R-R`, threshold = 3.5)
+  ) %>%
+  ungroup()
+
+# Modified plotting function with outlier visualization
+create_subject_plot <- function(subject_data) {
+  # Get outlier counts per condition
+  outlier_counts <- subject_data %>%
+    group_by(Condition_Order) %>%
+    summarise(outlier_count = sum(is_outlier, na.rm = TRUE))
+  
+  ggplot(subject_data, aes(x = Time, y = `Clean R-R`)) +
+    geom_line(color = "gray60", linewidth = 0.3) +
+    geom_point(data = ~ filter(.x, is_outlier), 
+               color = "red", size = 0.8, alpha = 0.7) +
+    geom_hline(aes(yintercept = median_rr), 
+               color = "blue", linetype = "dashed", linewidth = 0.3) +
+    geom_hline(aes(yintercept = median_rr + mad_threshold), 
+               color = "darkgreen", linetype = "dotted", linewidth = 0.3) +
+    geom_hline(aes(yintercept = median_rr - mad_threshold), 
+               color = "darkgreen", linetype = "dotted", linewidth = 0.3) +
+    geom_text(data = outlier_counts,
+              aes(x = -Inf, y = Inf, 
+                  label = paste("Outliers:", outlier_count)),
+              hjust = -0.1, vjust = 1.5, size = 2.5, color = "red") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id)),
+      x = "Time (s)",
+      y = "R-R Interval (ms)",
+      caption = "Blue dashed: Median | Green dotted: MAD thresholds"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8),
+      axis.text = element_text(size = 6)
+    )
+}
+
+# Create and save all plots with outliers marked
+subject_plots <- filtered_exp_annotated %>%
+  group_split(Id) %>%
+  map(create_subject_plot)
+
+# Print all plots (use arrow buttons in RStudio to navigate)
+walk(subject_plots, print)
+
+# Get tabular summary of outlier counts
+outlier_summary <- filtered_exp_annotated %>%
+  group_by(Id, Condition_Order) %>%
+  summarise(
+    total_points = n(),
+    outlier_count = sum(is_outlier, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View the outlier counts
+print(outlier_summary)
+
+
 ```
