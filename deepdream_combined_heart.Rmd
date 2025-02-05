@@ -457,3 +457,40 @@ walk(names(meanhr_plots), ~print(meanhr_plots[[.x]]))
 walk(names(hrv_plots), ~print(hrv_plots[[.x]]))
 
 ```
+## Plot R-R For All Subjects/Conditions
+
+```{r}
+# Join the mapping with filtered_exp to sync conditions
+filtered_exp_synced <- filtered_exp %>%
+  left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number")) %>%
+  filter(!is.na(`Clean R-R`))  # Remove NA values
+
+# Plotting function
+create_subject_plot <- function(subject_data) {
+  ggplot(subject_data, aes(x = Time, y = `Clean R-R`)) +
+    geom_line(color = "#2c7bb6", linewidth = 0.4) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id)),
+      x = "Time (s)",
+      y = "R-R Interval (s)"
+    ) +
+    theme_minimal() +
+    theme(
+      strip.background = element_rect(fill = "#f5f5f5"),
+      strip.text = element_text(size = 8, face = "bold"),
+      axis.text = element_text(size = 6),
+      plot.title = element_text(size = 10, hjust = 0.5),
+      panel.spacing = unit(0.3, "cm")
+    )
+}
+
+# Split data by subject and create plots
+subject_plots <- filtered_exp_synced %>%
+  group_split(Id) %>%
+  map(create_subject_plot)
+
+# View all plots
+walk(subject_plots, print) 
+
+```
