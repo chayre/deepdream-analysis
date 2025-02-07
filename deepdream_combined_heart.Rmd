@@ -27,6 +27,7 @@ library(ggpubr)
 library(rstatix)
 library(readr)
 library(gridExtra)
+library(rmcorr) 
 
 # Set working directory
 mds_dir <- here::here()
@@ -535,14 +536,14 @@ walk(hrv_subject_plots, print)
 #    ungroup()
 #}
 
-# 50% average threshold to identify outliers
+# 40% average threshold to identify outliers
 analyze_metric_outliers <- function(data, metric_col) {
   data %>%
     group_by(Id, Condition_Order) %>%
     mutate(
       avg_val = mean(!!sym(metric_col), na.rm = TRUE),
-      lower_threshold = 0.5 * avg_val,  # 50% below average
-      upper_threshold = 1.5 * avg_val,  # 50% above average
+      lower_threshold = 0.6 * avg_val,  # 40% below average
+      upper_threshold = 1.4 * avg_val,  # 40% above average
       is_outlier = (!!sym(metric_col) < lower_threshold) | (!!sym(metric_col) > upper_threshold)
     ) %>%
     ungroup()
@@ -654,15 +655,15 @@ filtered_exp_cleaned <- filtered_exp_synced %>%
   mutate(
     # HRV (R-R) calculations
     avg_rr = mean(`Clean R-R`, na.rm = TRUE),
-    lower_threshold_rr = 0.5 * avg_rr,
-    upper_threshold_rr = 1.5 * avg_rr,
+    lower_threshold_rr = 0.6 * avg_rr,
+    upper_threshold_rr = 1.4 * avg_rr,
     is_outlier_rr = (`Clean R-R` < lower_threshold_rr) | (`Clean R-R` > upper_threshold_rr),
     Clean_RR_Filtered = ifelse(is_outlier_rr, NA, `Clean R-R`),
     
     # HR calculations
     avg_hr = mean(`Heart Rate`, na.rm = TRUE),
-    lower_threshold_hr = 0.5 * avg_hr,
-    upper_threshold_hr = 1.5 * avg_hr,
+    lower_threshold_hr = 0.6 * avg_hr,
+    upper_threshold_hr = 1.4 * avg_hr,
     is_outlier_hr = (`Heart Rate` < lower_threshold_hr) | (`Heart Rate` > upper_threshold_hr),
     Heart_Rate_Filtered = ifelse(is_outlier_hr, NA, `Heart Rate`)
   ) %>%
@@ -819,32 +820,40 @@ ttest_meanhr_plots_no_outlier <- plot_individual_paired_comparisons(
 walk(names(meanhr_plots_no_outlier), ~print(meanhr_plots_no_outlier[[.x]]))
 walk(names(hrv_plots_no_outliers), ~print(hrv_plots_no_outliers[[.x]]))
 
-# Create PDF report
-pdf("HR_HRV_Report.pdf", width = 11, height = 8.5)  # Letter size landscape
-#plot.new()
-#print("Results")
-#grid.table(linked_results)
-#print("Results without Outliers")
-#grid.table(linked_results_filtered)
-#print("T-test Results")
-#grid.table(paired_ttest_results)
-#print("T-test Results without Outliers")
-#grid.table(paired_ttest_results_filtered)
-
-# HR plots
-walk(hr_subject_plots, print)
-walk(meanhr_plots_ttest, print)
-walk(outlier_subject_plots_hr, print)
-walk(hr_plots_no_outlier, print)
 walk(ttest_meanhr_plots_no_outlier, print)
-# HRV plots
-walk(hrv_subject_plots, print)
-walk(hrv_plots_ttest, print)
-walk(outlier_subject_plots_hrv, print)
-walk(hrv_plots_no_outlier, print)
 walk(ttest_hrv_plots_no_outliers, print)
+
+# Uncomment to Create PDF report
+# pdf("HR_HRV_Report.pdf", width = 11, height = 8.5)  # Letter size landscape
+# HR plots
+# walk(hr_subject_plots, print)
+# walk(meanhr_plots_ttest, print)
+# walk(outlier_subject_plots_hr, print)
+# walk(hr_plots_no_outlier, print)
+# walk(ttest_meanhr_plots_no_outlier, print)
+# HRV plots
+# walk(hrv_subject_plots, print)
+# walk(hrv_plots_ttest, print)
+# walk(outlier_subject_plots_hrv, print)
+# walk(hrv_plots_no_outlier, print)
+# walk(ttest_hrv_plots_no_outliers, print)
 # Close PDF device
-dev.off()
+# dev.off()
+
+paired_ttest_results_filtered
+```
+
+## Plotting Normalized HR and HRV
+
+```{r}
 
 
 ```
+
+## Plotting Repeated Measures Correlation - ASC Index vs. HR and HRV
+
+```{r}
+
+
+```
+
