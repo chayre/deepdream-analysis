@@ -54,9 +54,9 @@ add_time_column <- function(data) {
 # Change 4 and 8 events which are repeated to 0 (i.e. If event column has 4, 4, 4 -> 4, 0, 0)
 clean_repeated_events <- function(data) {
   data %>%
+    arrange(Id, Time) %>% 
     group_by(Id) %>%
     mutate(
-    arrange(Id, Time) %>%  # Ensure chronological order
       # Track time differences and event changes
       time_diff = Time - lag(Time, default = -Inf),
       event_changed = EVENT != lag(EVENT, default = first(EVENT)),
@@ -206,6 +206,7 @@ condensed_questions_combined <- questions_combined %>%
     QuestionIndex = as.factor(QuestionIndex)
   )
 
+# Table which links condition to section number and ID
 processed_questions_combined <- condensed_questions_combined %>%
   group_by(Id) %>%
   arrange(Id, row_number()) %>%
@@ -213,7 +214,28 @@ processed_questions_combined <- condensed_questions_combined %>%
   summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
   unnest_longer(Condition_Order) %>%
   group_by(Id) %>%
-  mutate(Order_Number = row_number())
+  mutate(Order_Number = row_number()) %>%
+  ungroup()
+
+# Calculate ASC_Score for each (Id, VideoMode, VideoName)
+asc_scores <- condensed_questions_combined %>%
+  group_by(Id, VideoMode, VideoName) %>%
+  mutate(ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE)) %>%
+  summarise(
+    ASC_Score = mean(QuestionAnswer[((QuestionIndex)) %in% 4:13], na.rm = TRUE),
+    VideoName = case_when(
+      grepl("Hallucinations", VideoName) ~ "Hallucinations",
+      grepl("Normal", VideoName) ~ "Normal",
+      TRUE ~ as.character(VideoName)
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_")) # Create Condition_Order to match
+
+# Combining ASC Scores with Condition_Order
+processed_questions_asc <- merge(processed_questions_combined, asc_scores,
+                   by.x = c("Id", "Condition_Order"), 
+                   all.x = TRUE)
 
 ```
 
@@ -455,8 +477,9 @@ hrv_plots_ttest <- plot_individual_paired_comparisons(
 )
 
 # Print all plots
-walk(names(meanhr_plots_ttest), ~print(meanhr_plots[[.x]]))
-walk(names(hrv_plots_ttest), ~print(hrv_plots[[.x]]))
+walk(meanhr_plots_ttest, print)
+walk(hrv_plots_ttest, print)
+
 
 ```
 
@@ -605,7 +628,7 @@ create_metric_plot <- function(subject_data, metric, y_label) {
       title = paste("Subject", unique(subject_data$Id), "-", y_label),
       x = "Time (s)",
       y = y_label,
-      caption = "Blue dashed: Average | Green dotted: 50% Thresholds"
+      caption = "Blue dashed: Average | Green dotted: 40% Thresholds"
     ) +
     theme_minimal() +
     theme(
@@ -624,10 +647,10 @@ outlier_subject_plots_hr <- filtered_exp_annotated %>%
   group_split(Id) %>%
   map(~ create_metric_plot(.x, "Heart Rate", "Heart Rate (bpm)"))
 
-# Print HR plots
+# Print HR plots 
 walk(outlier_subject_plots_hr, print)
 
-# Print HRV plots
+# Print HRV plots 
 walk(outlier_subject_plots_hrv, print)
 
 # Combined summary
@@ -646,7 +669,7 @@ print(outlier_summary)
 
 ```
 
-## Re-plotting HR and HRV without Outliers
+## Re-plotting HR and HRV without Outliers (Commented out)
 
 ```{r}
 # Process data with outlier replacement for both metrics
@@ -755,18 +778,18 @@ hrv_plots_no_outlier <- filtered_exp_cleaned %>%
   group_split(Id) %>%
   map(~ create_subject_plot(.x, "HRV"))
 
-# Print HR plots
-walk(hr_plots_no_outlier, print)
+# Print HR plots (Uncomment to print)
+#walk(hr_plots_no_outlier, print)
 
-# Print HRV plots
-walk(hrv_plots_no_outlier, print)
+# Print HRV plots (Uncomment to print)
+#walk(hrv_plots_no_outlier, print)
 
-# View outlier summary table
-print(outlier_summary)
+# View outlier summary table (Uncomment to print)
+#print(outlier_summary)
 
 ```
 
-# Re-doing T-Tests without Outliers
+# Re-doing t-tests without Outliers
 
 ```{r}
 # Calculate metrics using FILTERED DATA
@@ -817,9 +840,6 @@ ttest_meanhr_plots_no_outlier <- plot_individual_paired_comparisons(
 )
 
 # Print all plots
-walk(names(meanhr_plots_no_outlier), ~print(meanhr_plots_no_outlier[[.x]]))
-walk(names(hrv_plots_no_outliers), ~print(hrv_plots_no_outliers[[.x]]))
-
 walk(ttest_meanhr_plots_no_outlier, print)
 walk(ttest_hrv_plots_no_outliers, print)
 
@@ -843,17 +863,125 @@ walk(ttest_hrv_plots_no_outliers, print)
 paired_ttest_results_filtered
 ```
 
-## Plotting Normalized HR and HRV
+## Plotting Standardized HR and HRV (Outliers Removed)
 
 ```{r}
+filtered_exp_cleaned <- filtered_exp_cleaned %>%
+  group_by(Id) %>%
+  mutate(
+    # Calculate mean and standard deviation for Clean R-R
+    mean_rr = mean(`Clean_RR_Filtered`, na.rm = TRUE),
+    sd_rr = sd(`Clean_RR_Filtered`, na.rm = TRUE),
+    
+    # Standardized Clean R-R
+    Clean_RR_Standardized = (`Clean_RR_Filtered` - mean_rr) / sd_rr,
+    
+    # Calculate mean and standard deviation for Heart Rate
+    mean_hr = mean(`Heart_Rate_Filtered`, na.rm = TRUE),
+    sd_hr = sd(`Heart_Rate_Filtered`, na.rm = TRUE),
+    
+    # Standardized Heart Rate
+    Heart_Rate_Standardized = (`Heart_Rate_Filtered` - mean_hr) / sd_hr
+  ) %>%
+  ungroup()
 
+create_subject_plot_standardized <- function(subject_data, metric = c("HRV", "HR")) {
+  metric <- match.arg(metric)
+  if (metric == "HRV") {
+    y_var <- sym("Clean_RR_Standardized")
+    y_label <- "Standardized R-R Interval"
+  } else {
+    y_var <- sym("Heart_Rate_Standardized")
+    y_label <- "Standardized Heart Rate"
+  }
+
+  # Create the plot
+  ggplot(subject_data, aes(x = Time, y = !!y_var)) +
+    geom_line(color = "#1f77b4", linewidth = 0.4) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id), "- Standardized ", metric),
+      x = "Time (s)",
+      y = y_label,
+    ) +
+    theme_minimal()
+}
+
+# Generate and view plots for both metrics
+hr_plots_standardized <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot_standardized(.x, "HR"))
+
+hrv_plots_standardized <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot_standardized(.x, "HRV"))
+
+# Print HR plots
+walk(hr_plots_standardized, print)
+
+# Print HRV plots
+walk(hrv_plots_standardized, print)
 
 ```
 
-## Plotting Repeated Measures Correlation - ASC Index vs. HR and HRV
+## Plotting Repeated Measures Correlation - ASC Score vs. HRV
 
-```{r}
+```{r warning=FALSE, message=FALSE}
+# Add Mean HR and HRV to ASC Scores 
+processed_questions_merged <- merge(processed_questions_asc, linked_results_filtered,
+                   by.x = c("Id", "Condition_Order"), 
+                   all.x = TRUE)
 
+# Remove duplicate rows
+pqm <- processed_questions_merged %>% distinct()
+
+# Combine Mono and Stereo data
+# Group by Id and VideoName to calculate mean ASC_Score and heart_rate_variability
+pqm_combined <- pqm %>%
+  group_by(Id, VideoName) %>%
+  summarise(
+    ASC_Score = mean(ASC_Score, na.rm = TRUE),
+    heart_rate_variability = mean(heart_rate_variability, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# ASC vs HRV (Mono and Stereo ave)
+ggplot(pqm_combined, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# ASC vs HRV 
+ggplot(pqm, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability (s)",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Compute repeated measures correlation using combined mono/stereo scores
+rmcorr_result_combined <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm_combined)
+
+# View the results
+print(rmcorr_result_combined)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
 
 ```
 
