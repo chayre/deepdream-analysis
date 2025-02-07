@@ -186,7 +186,7 @@ data_base_processed <- clean_consecutive_rr(data_base_processed)
 
 ## Pulling out Condition Orders for each Subject
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 # Define file paths
 file_paths <- list.files(path = "pre-study", pattern = "_QuestionsData.csv", full.names = TRUE)
 
@@ -241,7 +241,7 @@ processed_questions_asc <- merge(processed_questions_combined, asc_scores,
 
 ## Investigating Events
 
-```{r}
+```{r warning=FALSE, message=FALSE}
 plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
   # Filter data for the given Id and remove EVENT = 0
   subject_data <- data %>% 
@@ -259,7 +259,7 @@ plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
 }
 
 # Execution
-map(1:14, plot_event_by_frame)  # Loop through Ids 1-14
+map(1, plot_event_by_frame)  # Only plotting the first subject
 
 ```
 
@@ -397,7 +397,7 @@ paired_ttest_results <- run_all_paired_ttests(linked_results)
 print(paired_ttest_results)
 
 ```
-## Plotting Paired T-test Results
+## Plotting Paired T-test Results (Commented out)
 
 ```{r}
 plot_individual_paired_comparisons <- function(data, ttest_results, metric = "mean_heart_rate") {
@@ -476,9 +476,9 @@ hrv_plots_ttest <- plot_individual_paired_comparisons(
   metric = "heart_rate_variability"
 )
 
-# Print all plots
-walk(meanhr_plots_ttest, print)
-walk(hrv_plots_ttest, print)
+# Print all plots (commented out)
+# walk(meanhr_plots_ttest, print)
+# walk(hrv_plots_ttest, print)
 
 
 ```
