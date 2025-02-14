@@ -966,7 +966,7 @@ ggplot(pqm, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id)
   geom_point(size = 2) +  # Scatterplot points
   geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
   labs(
-    x = "Heart Rate Variability (s)",
+    x = "Heart Rate Variability",
     y = "ASC Score",
     color = "Subject ID",
     shape = "Video Type"
@@ -996,7 +996,7 @@ rmcorr_result_Q2 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q2
 rmcorr_result_Q3 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q3Answer, dataset = pqm)
 
 
-# ASC vs Q1
+# Q1 vs ASC
 ggplot(pqm, aes(x = Q1Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
   geom_point(size = 2) +  # Scatterplot points
   geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
@@ -1012,7 +1012,7 @@ ggplot(pqm, aes(x = Q1Answer, y = ASC_Score, color = as.factor(Id), shape = Vide
            label = sprintf("p = %.3e\nr = %.3f", rmcorr_result_Q1$p, rmcorr_result_Q1$r),
            family = "mono") 
 
-# ASC vs Q2
+# Q2 vs ASC
 ggplot(pqm, aes(x = Q2Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
   geom_point(size = 2) +  # Scatterplot points
   geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
@@ -1029,7 +1029,7 @@ ggplot(pqm, aes(x = Q2Answer, y = ASC_Score, color = as.factor(Id), shape = Vide
            family = "mono") 
 
 
-# ASC vs Q3
+# Q3 vs ASC
 ggplot(pqm, aes(x = Q3Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
   geom_point(size = 2) +  # Scatterplot points
   geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
@@ -1051,5 +1051,141 @@ print(rmcorr_result_Q1)
 print(rmcorr_result_Q2)
 
 print(rmcorr_result_Q3)
+```
+## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV from Baseline?
+
+```{r warning=FALSE, message=FALSE}
+# Process baseline data (remove outliers, calculate Mean HR and HRV)
+data_base_processed_no_outliers <- data_base_processed %>%
+  group_by(Id) %>%
+  mutate(
+    # HRV (R-R) calculations
+    avg_rr = mean(`Clean R-R`, na.rm = TRUE),
+    lower_threshold_rr = 0.6 * avg_rr,
+    upper_threshold_rr = 1.4 * avg_rr,
+    is_outlier_rr = (`Clean R-R` < lower_threshold_rr) | (`Clean R-R` > upper_threshold_rr),
+    Clean_RR_Filtered = ifelse(is_outlier_rr, NA, `Clean R-R`),
+    
+    # HR calculations
+    avg_hr = mean(`Heart Rate`, na.rm = TRUE),
+    lower_threshold_hr = 0.6 * avg_hr,
+    upper_threshold_hr = 1.4 * avg_hr,
+    is_outlier_hr = (`Heart Rate` < lower_threshold_hr) | (`Heart Rate` > upper_threshold_hr),
+    Heart_Rate_Filtered = ifelse(is_outlier_hr, NA, `Heart Rate`)
+  ) %>%
+  ungroup()
+
+baseline_results <- data_base_processed_no_outliers %>%
+  filter(Id %in% 1:14) %>%
+  group_by(Id) %>%
+  arrange(Time) %>%
+  summarise(
+    mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    
+    # Improved HRV calculation
+    heart_rate_variability = {
+      clean_rr <- na.omit(`Clean R-R`)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD from consecutive non-NA values
+      } else {
+        NA_real_
+      }
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
+  )
+
+# Add baseline differences for mean heart rate and heart rate variability
+baseline_differences <- pqm %>%
+  left_join(
+    baseline_results %>% 
+      select(Id, baseline_mean_hr = mean_heart_rate, baseline_hrv = heart_rate_variability), 
+    by = "Id"
+  ) %>%
+  mutate(
+    baseline_difference_mean_hr = mean_heart_rate - baseline_mean_hr,
+    baseline_difference_hrv = heart_rate_variability - baseline_hrv
+  ) %>%
+  select(-baseline_mean_hr, -baseline_hrv)  # Remove intermediate columns
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineHRV_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q1$p, rmcorr_result_BaselineHRV_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q2$p, rmcorr_result_BaselineHRV_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q3$p, rmcorr_result_BaselineHRV_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_ASC$p, rmcorr_result_BaselineHRV_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineHRV_Q1)
+print(rmcorr_result_BaselineHRV_Q2)
+print(rmcorr_result_BaselineHRV_Q3)
+print(rmcorr_result_BaselineHRV_ASC)
+
 ```
 
