@@ -217,12 +217,15 @@ processed_questions_combined <- condensed_questions_combined %>%
   mutate(Order_Number = row_number()) %>%
   ungroup()
 
-# Calculate ASC_Score for each (Id, VideoMode, VideoName)
+# Calculate ASC Scores, add questions 1 - 3 answers
 asc_scores <- condensed_questions_combined %>%
   group_by(Id, VideoMode, VideoName) %>%
   mutate(ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE)) %>%
   summarise(
-    ASC_Score = mean(QuestionAnswer[((QuestionIndex)) %in% 4:13], na.rm = TRUE),
+    ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE),
+    Q1Answer = QuestionAnswer[QuestionIndex == 1][1],
+    Q2Answer = QuestionAnswer[QuestionIndex == 2][1],
+    Q3Answer = QuestionAnswer[QuestionIndex == 3][1],
     VideoName = case_when(
       grepl("Hallucinations", VideoName) ~ "Hallucinations",
       grepl("Normal", VideoName) ~ "Normal",
@@ -230,7 +233,7 @@ asc_scores <- condensed_questions_combined %>%
     ),
     .groups = "drop"
   ) %>%
-  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_")) # Create Condition_Order to match
+  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_"))
 
 # Combining ASC Scores with Condition_Order
 processed_questions_asc <- merge(processed_questions_combined, asc_scores,
@@ -983,5 +986,70 @@ rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart
 # View the results
 print(rmcorr_result)
 
+```
+## Do Answers to Questions 1 - 3 correlate with ASC Score?
+
+```{r warning=FALSE, message=FALSE}
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_Q1 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q1Answer, dataset = pqm)
+rmcorr_result_Q2 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q2Answer, dataset = pqm)
+rmcorr_result_Q3 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q3Answer, dataset = pqm)
+
+
+# ASC vs Q1
+ggplot(pqm, aes(x = Q1Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3e\nr = %.3f", rmcorr_result_Q1$p, rmcorr_result_Q1$r),
+           family = "mono") 
+
+# ASC vs Q2
+ggplot(pqm, aes(x = Q2Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q2$p, rmcorr_result_Q2$r),
+           family = "mono") 
+
+
+# ASC vs Q3
+ggplot(pqm, aes(x = Q3Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q3$p, rmcorr_result_Q3$r),
+           family = "mono") 
+
+
+print(rmcorr_result_Q1)
+
+print(rmcorr_result_Q2)
+
+print(rmcorr_result_Q3)
 ```
 
