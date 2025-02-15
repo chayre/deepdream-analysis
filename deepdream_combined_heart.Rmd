@@ -30,6 +30,8 @@ library(gridExtra)
 library(rmcorr) 
 library(lme4)
 library(lmerTest)
+library(broom)
+library(purrr)
 
 # Set working directory
 mds_dir <- here::here()
@@ -1104,6 +1106,51 @@ print(p3)
 analyze_and_plot("Q1Answer")
 analyze_and_plot("Q2Answer")
 analyze_and_plot("Q3Answer")
+```
+
+## Linear Regression Model Between Q1-3 and ASC Score (Condition-Specific)
+
+```{r warning=FALSE, message=FALSE}
+
+run_lm_by_condition <- function(data, response_var) {
+  response_var <- enquo(response_var)
+
+  model_summaries <- data %>%
+    group_by(Condition_Order) %>%
+    nest() %>%
+    mutate(
+      model = map(data, ~ lm(as.formula(paste("ASC_Score ~", quo_name(response_var))), data = .)),
+      tidy_model = map(model, broom::tidy)
+    ) %>%
+    unnest(tidy_model)
+
+  r_values <- data %>%
+    group_by(Condition_Order) %>%
+    summarise(r = cor(ASC_Score, !!response_var, use = "complete.obs")) %>%
+    mutate(r_label = paste0("r = ", round(r, 2)))
+
+  pvals <- model_summaries %>% 
+    filter(term == quo_name(response_var)) %>% 
+    select(Condition_Order, p.value) %>% 
+    mutate(p_label = paste0("p = ", signif(p.value, 2)))
+
+  ggplot(data, aes_string(x = quo_name(response_var), y = "ASC_Score")) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    facet_wrap(~ Condition_Order) +
+    geom_text(data = pvals, aes(x = -Inf, y = Inf, label = p_label), hjust = -1.1, vjust = 2.4, size = 4, inherit.aes = FALSE) +
+    geom_text(data = r_values, aes(x = -Inf, y = Inf, label = r_label), hjust = -1.4, vjust = 4.1, size = 4, inherit.aes = FALSE) +
+    labs(title = paste("Regression of", quo_name(response_var), "on ASC_Score by Condition"),
+         x = quo_name(response_var),
+         y = "ASC_Score") +
+    theme_minimal()
+}
+
+# Execution:
+run_lm_by_condition(pqm, Q1Answer)
+run_lm_by_condition(pqm, Q2Answer)
+run_lm_by_condition(pqm, Q3Answer)
+
 ```
 
 
