@@ -28,6 +28,8 @@ library(rstatix)
 library(readr)
 library(gridExtra)
 library(rmcorr) 
+library(lme4)
+library(lmerTest)
 
 # Set working directory
 mds_dir <- here::here()
@@ -1052,6 +1054,59 @@ print(rmcorr_result_Q2)
 
 print(rmcorr_result_Q3)
 ```
+## Linear Regression Model for Questions 1/2/3 vs. ASC Score
+
+```{r warning=FALSE, message=FALSE}
+pqm$Condition_Order <- as.factor(pqm$Condition_Order)
+
+analyze_and_plot <- function(response_var) {
+# Fit the model
+formula <- as.formula(paste("ASC_Score ~ ", response_var, " + Condition_Order + (1 | Id)"))
+model <- lmer(formula, data = pqm)
+print(paste("ASC ~", response_var, "ANOVA"))
+print(summary(model))
+print(anova(model))
+print("-------------------------------")
+  
+# Plot the relationship
+p1 <- ggplot(pqm, aes(x = .data[[response_var]], y = ASC_Score, color = Condition_Order)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = paste("ASC ~", response_var, "by Condition Type"), x = response_var, y = "ASC Score") +
+  theme_minimal()
+  
+# Create a data frame with fitted values and residuals
+resid_data <- data.frame(
+  Fitted = fitted(model),
+  Residuals = resid(model),
+  Condition = pqm$Condition_Order
+)
+
+# Residuals vs. Fitted
+p2 <- ggplot(resid_data, aes(x = Fitted, y = Residuals, color = Condition)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Residuals vs. Fitted ASC Score ~ ", response_var), x = paste("ASC Score Fitted Values"), y = paste("ASC Score Residuals")) +
+  theme_minimal()
+  
+# QQ-plot
+p3 <- ggplot(resid_data, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = paste("QQ-Plot of Residuals for ASC Score ~ ", response_var)) +
+  theme_minimal()
+
+print(p1)
+print(p2)
+print(p3)
+}
+
+analyze_and_plot("Q1Answer")
+analyze_and_plot("Q2Answer")
+analyze_and_plot("Q3Answer")
+```
+
+
 ## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV from Baseline?
 
 ```{r warning=FALSE, message=FALSE}
@@ -1188,4 +1243,3 @@ print(rmcorr_result_BaselineHRV_Q3)
 print(rmcorr_result_BaselineHRV_ASC)
 
 ```
-
