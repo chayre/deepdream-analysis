@@ -1369,6 +1369,7 @@ print(rmcorr_result_BaselineMeanHR_Q3)
 print(rmcorr_result_BaselineMeanHR_ASC)
 
 ```
+
 ## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
 
 ```{r warning=FALSE, message=FALSE}
@@ -1416,46 +1417,85 @@ mean_pupil_size_df_baseline <- baseline_combined %>%
 final_pupil_size_df <- mean_pupil_size_df %>%
   left_join(mean_pupil_size_df_baseline %>% select(Id, MeanAveragePupilSizeBaseline), by = "Id") %>%
   mutate(MeanPupilSize_Baseline_Diff = MeanAveragePupilSize - MeanAveragePupilSizeBaseline) %>%
-  select(Id, Condition_Order, AdjustedPupilSize)
+  select(Id, Condition_Order, MeanPupilSize_Baseline_Diff)
+
+baseline_differences <- baseline_differences %>%
+  left_join(final_pupil_size_df %>% select(Id, Condition_Order, MeanPupilSize_Baseline_Diff), by = c("Id", "Condition_Order"))
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineMeanPupil_Q1 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q2 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q3 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_ASC <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = ASC_Score, dataset = baseline_differences)
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q1$p, rmcorr_result_BaselineMeanPupil_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q2$p, rmcorr_result_BaselineMeanPupil_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q3$p, rmcorr_result_BaselineMeanPupil_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_ASC$p, rmcorr_result_BaselineMeanPupil_ASC$r),
+           family = "mono") 
 
 
-
-
-
-# Table which links condition to section number and ID
-processed_questions_combined <- condensed_questions_combined %>%
-  group_by(Id) %>%
-  arrange(Id, row_number()) %>%
-  mutate(Order = paste(VideoMode, Condition, sep = "_")) %>%
-  summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
-  unnest_longer(Condition_Order) %>%
-  group_by(Id) %>%
-  mutate(Order_Number = row_number()) %>%
-  ungroup()
-
-# Calculate ASC Scores, add questions 1 - 3 answers
-asc_scores <- condensed_questions_combined %>%
-  group_by(Id, VideoMode, VideoName) %>%
-  mutate(ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE)) %>%
-  summarise(
-    ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE),
-    Q1Answer = QuestionAnswer[QuestionIndex == 1][1],
-    Q2Answer = QuestionAnswer[QuestionIndex == 2][1],
-    Q3Answer = QuestionAnswer[QuestionIndex == 3][1],
-    VideoName = case_when(
-      grepl("Hallucinations", VideoName) ~ "Hallucinations",
-      grepl("Normal", VideoName) ~ "Normal",
-      TRUE ~ as.character(VideoName)
-    ),
-    .groups = "drop"
-  ) %>%
-  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_"))
-
-# Combining ASC Scores with Condition_Order
-processed_questions_asc <- merge(processed_questions_combined, asc_scores,
-                   by.x = c("Id", "Condition_Order"), 
-                   all.x = TRUE)
-
-
+print(rmcorr_result_BaselineMeanPupil_Q1)
+print(rmcorr_result_BaselineMeanPupil_Q2)
+print(rmcorr_result_BaselineMeanPupil_Q3)
+print(rmcorr_result_BaselineMeanPupil_ASC)
 
 ```
