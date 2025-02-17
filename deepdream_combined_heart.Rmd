@@ -102,7 +102,7 @@ clean_consecutive_rr <- function(data) {
 ## Load and Process All Subject Data
 
 ```{r warning=FALSE, message=FALSE}
-# Import data
+# Import ECG data
 import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
   # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
   file_list <- list.files(
@@ -150,6 +150,8 @@ import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding
 
   return(data)
 }
+
+
 
 process_all_subjects <- function(raw_data) {
   # Clean column names
@@ -1154,7 +1156,7 @@ run_lm_by_condition(pqm, Q3Answer)
 ```
 
 
-## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV from Baseline?
+## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV (or Mean HR) from Baseline?
 
 ```{r warning=FALSE, message=FALSE}
 # Process baseline data (remove outliers, calculate Mean HR and HRV)
@@ -1288,5 +1290,89 @@ print(rmcorr_result_BaselineHRV_Q1)
 print(rmcorr_result_BaselineHRV_Q2)
 print(rmcorr_result_BaselineHRV_Q3)
 print(rmcorr_result_BaselineHRV_ASC)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineMeanHR_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q1$p, rmcorr_result_BaselineMeanHR_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q2$p, rmcorr_result_BaselineMeanHR_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q3$p, rmcorr_result_BaselineMeanHR_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_ASC$p, rmcorr_result_BaselineMeanHR_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineMeanHR_Q1)
+print(rmcorr_result_BaselineMeanHR_Q2)
+print(rmcorr_result_BaselineMeanHR_Q3)
+print(rmcorr_result_BaselineMeanHR_ASC)
+
+```
+## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
+
+```{r warning=FALSE, message=FALSE}
+
+
 
 ```
