@@ -1372,6 +1372,89 @@ print(rmcorr_result_BaselineMeanHR_ASC)
 ## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
 
 ```{r warning=FALSE, message=FALSE}
+# Define file paths
+file_paths <- list.files(path = "pre-study", pattern = "_DeviceData.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+device_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+condensed_device_combined <- device_combined %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName)
+  ) %>%
+  group_by(Id) %>%
+  mutate(Condition_Order = paste(VideoMode, Condition, sep = "_")) %>%
+  unnest_longer(Condition_Order)
+
+mean_pupil_size_df <- condensed_device_combined %>%
+  filter(Condition_Order != "NA_NA") %>%
+  group_by(Id, Condition_Order) %>%
+  summarise(
+    MeanAveragePupilSize = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Define file paths
+file_paths <- list.files(path = "pre-study", pattern = "_Baseline.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+baseline_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+mean_pupil_size_df_baseline <- baseline_combined %>%
+  group_by(Id) %>%
+  summarise(
+    MeanAveragePupilSizeBaseline = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+final_pupil_size_df <- mean_pupil_size_df %>%
+  left_join(mean_pupil_size_df_baseline %>% select(Id, MeanAveragePupilSizeBaseline), by = "Id") %>%
+  mutate(MeanPupilSize_Baseline_Diff = MeanAveragePupilSize - MeanAveragePupilSizeBaseline) %>%
+  select(Id, Condition_Order, AdjustedPupilSize)
+
+
+
+
+
+# Table which links condition to section number and ID
+processed_questions_combined <- condensed_questions_combined %>%
+  group_by(Id) %>%
+  arrange(Id, row_number()) %>%
+  mutate(Order = paste(VideoMode, Condition, sep = "_")) %>%
+  summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
+  unnest_longer(Condition_Order) %>%
+  group_by(Id) %>%
+  mutate(Order_Number = row_number()) %>%
+  ungroup()
+
+# Calculate ASC Scores, add questions 1 - 3 answers
+asc_scores <- condensed_questions_combined %>%
+  group_by(Id, VideoMode, VideoName) %>%
+  mutate(ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE)) %>%
+  summarise(
+    ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE),
+    Q1Answer = QuestionAnswer[QuestionIndex == 1][1],
+    Q2Answer = QuestionAnswer[QuestionIndex == 2][1],
+    Q3Answer = QuestionAnswer[QuestionIndex == 3][1],
+    VideoName = case_when(
+      grepl("Hallucinations", VideoName) ~ "Hallucinations",
+      grepl("Normal", VideoName) ~ "Normal",
+      TRUE ~ as.character(VideoName)
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_"))
+
+# Combining ASC Scores with Condition_Order
+processed_questions_asc <- merge(processed_questions_combined, asc_scores,
+                   by.x = c("Id", "Condition_Order"), 
+                   all.x = TRUE)
 
 
 
