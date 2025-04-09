@@ -4,6 +4,7 @@
 .Ruserdata
 *.csv
 *.acq
-*.html
 DDVR_pilot.rmd
 DDVR_pilot_earlier.rmd
+*.png
+*ID01
