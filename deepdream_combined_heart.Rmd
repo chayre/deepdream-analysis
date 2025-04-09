@@ -32,6 +32,7 @@ library(lme4)
 library(lmerTest)
 library(broom)
 library(purrr)
+library(reticulate)
 
 # Set working directory
 mds_dir <- here::here()
@@ -257,11 +258,11 @@ plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
     filter(Id == subject_id, EVENT != 0)
   
   # Create the plot
-  ggplot(subject_data, aes(x = seq_along(EVENT), y = EVENT)) +
+  ggplot(subject_data, aes(x = Time, y = EVENT)) +
     geom_point(color = "red", size = 1, alpha = 0.7) +  # Add points
     labs(
-      title = paste("EVENT by Frame for Id =", subject_id),
-      x = "Frame (Index)",
+      title = paste("EVENTs for Id =", subject_id),
+      x = "Time",
       y = "EVENT"
     ) +
     theme_minimal()
@@ -308,8 +309,55 @@ filter_between_events <- function(data, start_event = 4, end_event = 8) {
 filtered_exp <- filter_between_events(data_exp_processed)
 
 
+# Use the correct Python version
+use_python("C:/Users/CAyre/AppData/Local/Programs/Python/Python313", required = TRUE)
+
+# Load the Python script
+source_python("HR Entropy Pipeline/scripts/HR_Entropy_Pipeline_R_Input.py")
+
+# Import pandas
+pd <- import("pandas")
+
+# Sort dataframe by section and id
+df_sorted <- filtered_exp %>%
+  arrange(section_id, Id)
+
+# Initialize an empty dataframe to store Python results
+python_results <- data.frame(
+  section_id = integer(),
+  Id = integer(),
+  HR_entropy = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Process each section_id & subject_id combination
+unique_combinations <- df_sorted %>%
+  distinct(section_id, Id)
+
+for (i in 1:nrow(unique_combinations)) {
+  section_val <- unique_combinations$section_id[i]
+  subject_val <- unique_combinations$Id[i]
+
+  # Filter data for the specific section and subject
+  df_subset <- df_sorted %>%
+    filter(section_id == section_val, Id == subject_val)
+
+  # Convert to Pandas DataFrame
+  df_py <- r_to_py(df_subset)
+
+  # Run Python function
+  entropy_result <- process_dataframe(df_py)
+
+  # Append results to our dataframe
+  python_results <- rbind(python_results, data.frame(
+    section_id = section_val,
+    Id = subject_val,
+    HR_entropy = entropy_result[2]  # Second element is entropy value
+  ))
+}
+
 # Calculating Mean Heart Rate and Heart Rate Variability in each section (between Event = 4 and Event = 8) for each subject
-results <- filtered_exp %>%
+hr_results <- filtered_exp %>%
   filter(Id %in% 1:14, section_id %in% 1:4) %>%
   group_by(Id, section_id) %>%
   arrange(Time) %>%
@@ -330,26 +378,29 @@ results <- filtered_exp %>%
   mutate(
     mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
   )
-# View results sorted by Id and section
-results %>% arrange(Id, section_id)
 
-# Join results table with the condensed data to include condition names
-linked_results <- results %>%
+# Merge HR, HRV, and entropy results into a single dataframe
+combined_results <- hr_results %>%
+  left_join(python_results, by = c("Id", "section_id"))
+
+# Join with condition names (processed_questions_combined)
+linked_results <- combined_results %>%
   left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
 
-# Uncomment below to see the 4 & 8 events picked out for a given subject Id
-#data_event <- data_exp_processed %>%
-#  filter(Id == 2 & EVENT %in% c(4, 8)) 
-#data_event
+# View the final sorted results
+linked_results %>% arrange(Id, section_id)
+
+# Print the final results dataframe
+print(linked_results)
 
 ```
 
-## Paired T-Test for Mean Heart Rate
+## Paired T-Test for Mean Heart Rate, HRV, and HR Entropy
 ```{r}
 # Function to run paired t-tests for all combinations of conditions
 run_all_paired_ttests <- function(data) {
   # Check required columns exist
-  required_cols <- c("Id", "Condition_Order", "mean_heart_rate", "heart_rate_variability")
+  required_cols <- c("Id", "Condition_Order", "mean_heart_rate", "heart_rate_variability", "HR_entropy")
   if (!all(required_cols %in% colnames(data))) {
     stop("Missing required columns. Needed: ", paste(required_cols, collapse = ", "))
   }
@@ -360,7 +411,7 @@ run_all_paired_ttests <- function(data) {
     setNames(c("condition1", "condition2"))
 
   # Process both metrics
-  purrr::map_df(c("mean_heart_rate", "heart_rate_variability"), function(metric) {
+  purrr::map_df(c("mean_heart_rate", "heart_rate_variability", "HR_entropy"), function(metric) {
     purrr::map_df(1:nrow(pairs), function(i) {
       pair <- pairs[i, ]
 
@@ -452,9 +503,16 @@ plot_individual_paired_comparisons <- function(data, ttest_results, metric = "me
         title = paste("Comparison:", pair$comparison),
         subtitle = paste0("Paired t-test: p = ", round(pair$p.value, 3)),
         x = "Condition",
-        y = ifelse(metric == "mean_heart_rate",
-                   "Mean Heart Rate (bpm)", 
-                   "Heart Rate Variability (RMSSD)"),
+        y = if (metric == "mean_heart_rate") {
+            "Mean Heart Rate (bpm)"
+            } else if (metric == "HR_entropy") {
+            "HR Entropy"
+            } else {
+            "Heart Rate Variability (RMSSD)"
+            },
+          #ifelse(metric == "mean_heart_rate",
+          #         "Mean Heart Rate (bpm)", 
+           #        "Heart Rate Variability (RMSSD)"),
         fill = "Condition"
       ) +
       theme_minimal(base_size = 14) +
@@ -480,6 +538,13 @@ meanhr_plots_ttest <- plot_individual_paired_comparisons(
 
 # Generate individual plots for heart rate variability
 hrv_plots_ttest <- plot_individual_paired_comparisons(
+  data = linked_results,
+  ttest_results = paired_ttest_results,
+  metric = "heart_rate_variability"
+)
+
+# Generate individual plots for heart rate variability
+hr_entropy_ttest <- plot_individual_paired_comparisons(
   data = linked_results,
   ttest_results = paired_ttest_results,
   metric = "heart_rate_variability"
@@ -810,6 +875,8 @@ results_filtered <- filtered_exp_cleaned %>%
     # Use filtered heart rate (outliers replaced with NA)
     mean_heart_rate = mean(Heart_Rate_Filtered, na.rm = TRUE),
     
+    # Add HR_entropy
+    
     # HRV calculation using filtered RR intervals
     heart_rate_variability = {
       clean_rr <- na.omit(Clean_RR_Filtered)
@@ -832,6 +899,11 @@ results_filtered %>% arrange(Id, section_id)
 linked_results_filtered <- results_filtered %>%
   left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
 
+# Add HR Entropy
+linked_results_filtered <- linked_results_filtered %>%
+  left_join(linked_results %>% select(Id, Condition_Order, HR_entropy), 
+             by = c("Id", "Condition_Order"))
+
 paired_ttest_results_filtered <- run_all_paired_ttests(linked_results_filtered)
 
 # Generate individual plots for heart rate variability (no outliers)
@@ -848,9 +920,17 @@ ttest_meanhr_plots_no_outlier <- plot_individual_paired_comparisons(
   metric = "mean_heart_rate"
 )
 
+# Generate individual plots for heart rate variability (no outliers)
+ttest_entropy_plots <- plot_individual_paired_comparisons(
+  data = linked_results_filtered,
+  ttest_results = paired_ttest_results_filtered,
+  metric = "HR_entropy"
+)
+
 # Print all plots
 walk(ttest_meanhr_plots_no_outlier, print)
 walk(ttest_hrv_plots_no_outliers, print)
+walk(ttest_entropy_plots, print)
 
 # Uncomment to Create PDF report
 # pdf("HR_HRV_Report.pdf", width = 11, height = 8.5)  # Letter size landscape
@@ -933,10 +1013,10 @@ walk(hrv_plots_standardized, print)
 
 ```
 
-## Plotting Repeated Measures Correlation - ASC Score vs. HRV
+## Plotting Repeated Measures Correlation - ASC Score vs. HRV and HR Entropy
 
 ```{r warning=FALSE, message=FALSE}
-# Add Mean HR and HRV to ASC Scores 
+# Add Mean HR, HRV, HR Entropy to ASC Scores 
 processed_questions_merged <- merge(processed_questions_asc, linked_results_filtered,
                    by.x = c("Id", "Condition_Order"), 
                    all.x = TRUE)
@@ -950,7 +1030,8 @@ pqm_combined <- pqm %>%
   group_by(Id, VideoName) %>%
   summarise(
     ASC_Score = mean(ASC_Score, na.rm = TRUE),
-    heart_rate_variability = mean(heart_rate_variability, na.rm = TRUE)
+    heart_rate_variability = mean(heart_rate_variability, na.rm = TRUE),
+    HR_entropy = mean(HR_entropy)
   ) %>%
   ungroup()
 
@@ -988,6 +1069,26 @@ print(rmcorr_result_combined)
 
 # Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
 rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
+
+# ASC vs HR Entropy 
+ggplot(pqm, aes(x = HR_entropy, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Entropy",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = HR_entropy, dataset = pqm)
 
 # View the results
 print(rmcorr_result)
