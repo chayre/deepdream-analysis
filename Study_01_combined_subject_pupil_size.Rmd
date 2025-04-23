@@ -996,6 +996,104 @@ print(condition_summary)
 ```
 
 ## Statistical Testing of Gaze Analysis
+
+```{r warning=FALSE, message=FALSE}
+# Function to run all specified comparisons for a metric
+run_all_comparisons <- function(condition_summary, metric, comparisons_list) {
+  results <- list()
+  
+  # Loop through each comparison pair in the list
+  for (pair in comparisons_list) {
+    condition1 <- pair[1]
+    condition2 <- pair[2]
+    
+    tryCatch({
+      result <- perform_paired_ttest(
+        condition_summary = condition_summary,
+        metric = metric,
+        condition1 = condition1,
+        condition2 = condition2
+      )
+      
+      # Generate plot title
+      plot_title <- paste(
+        "Comparison:", metric, "\n",
+        condition1, "vs", condition2
+      )
+      
+      # Store results
+      comparison_name <- paste(condition1, "vs", condition2, sep = "_")
+      results[[comparison_name]] <- list(
+        test_result = result,
+        plot = plot_paired_gaze_comparison(result, plot_title)
+      )
+    }, error = function(e) {
+      message("Skipping ", condition1, " vs ", condition2, " for ", metric, ": ", e$message)
+    })
+  }
+  return(results)
+}
+
+# Main analysis workflow
+analyze_all_metrics <- function(condition_summary, comparisons_list) {
+  # Define metrics to analyze
+  metrics <- c("Mean_Stability", "Mean_Vergence", "Number_Fixations")
+  
+  # Run analysis for each metric
+  all_results <- list()
+  for (metric in metrics) {
+    all_results[[metric]] <- run_all_comparisons(
+      condition_summary = condition_summary,
+      metric = metric,
+      comparisons_list = comparisons_list
+    )
+  }
+  return(all_results)
+}
+
+# Execute the analysis
+final_results <- analyze_all_metrics(condition_summary, comparisons)
+
+# Example of accessing results:
+# Print all stability plots
+for (pair_result in final_results$Mean_Stability) {
+  print(pair_result$plot)
+}
+
+# Get p-values for all vergence comparisons
+vergence_results <- sapply(final_results$Mean_Vergence, function(x) {
+  c(
+    p.value = x$test_result$test_result$p.value,
+    cohens.d = x$test_result$effect_size,
+    n = x$test_result$n_pairs
+  )
+})
+
+# Compile all results into a dataframe
+results_df <- map_df(names(final_results), function(metric) {
+  map_df(names(final_results[[metric]]), function(comparison) {
+    res <- final_results[[metric]][[comparison]]$test_result
+    data.frame(
+      Metric = metric,
+      Comparison = comparison,
+      Mean_Difference = res$test_result$estimate,
+      t_value = res$test_result$statistic,
+      df = res$test_result$parameter,
+      p_value = res$test_result$p.value,
+      Cohen_d = res$effect_size,
+      n_pairs = res$n_pairs,
+      stringsAsFactors = FALSE
+    )
+  })
+})
+
+# Print the results dataframe
+print(results_df)
+```
+
+
+
+
 ```{r warning=FALSE, message=FALSE}
 # Function for Paired T-test
 perform_paired_ttest <- function(condition_summary, metric, condition1, condition2) {
