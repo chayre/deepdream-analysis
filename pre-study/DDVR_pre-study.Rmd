@@ -1,0 +1,889 @@
+---
+title: <font size="5"><strong> Subjective and Physiological Effects of Phenomenologically Distinct Visual Hallucinations in Virtual Reality (Pre-study - Subjective Questions) </strong></font>
+author: <br> <font size="4"> Corresponding author </font> <br> pmotyka@psych.pan.pl  <br> 
+date: <font size="3"> January 2025  </font>
+output: html_document
+chunk_output_type: console
+
+--- 
+
+&nbsp;
+<br>
+<font size="4">
+**Sections**:
+
+1. Data Preparation [S1](#S1)
+2. Individual Subject Overview [S2](#S2)
+3. Questions Overview [S3](#S3)
+4. Questions Analysis [S4](#S4)
+5. ASC Index Analysis [S5](#S5)
+6. Psychometric Analysis [S6](#S6)
+
+
+<br>
+**1. Data Preparation**  [S1](#S1)
+
+<a name="S1"></a>
+&nbsp;
+
+
+```{r, message = FALSE, warning = FALSE}
+
+# Load necessary libraries
+library(tidyverse)
+library(here)
+library(scales)
+library(emmeans)
+library(afex)
+library(tidyverse)
+library(pheatmap)
+library(grid)
+library(gridExtra)
+library(tidyverse)
+library(psych)
+library(lavaan)
+
+# Set working directory
+dir <- here::here()
+
+# Load and concatenate all data files
+data_files <- list.files(path = dir, pattern = "_QuestionsData.csv", full.names = TRUE)
+df_full <- data_files %>%
+  map_dfr(~ read.csv(.x, sep = ";", header = TRUE))
+
+# Clean the data
+df <- df_full %>%
+  select(Id, VideoName, VideoMode, QuestionIndex, QuestionAnswer) %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName),
+    QuestionIndex = as.factor(QuestionIndex)
+  )
+
+# Define custom colors for questions
+question_colors <- c(
+  "1" = "#440154", "2" = "#7D1322", "3" = "#b08d02", 
+  "4" = "#44C665", "5" = "#44C665", 
+  "6" = "#22A785", "7" = "#22A785", "8" = "#22A785", 
+  "9" = "#25848E", "10" = "#25848E", "11" = "#25848E", "12" = "#6DD848", "13" = "#88E03C"
+)
+
+```
+
+
+<br>
+**2. Individual Subject Overview**  [S2](#S2)
+
+<a name="S2"></a>
+&nbsp;
+
+```{r, message = FALSE, warning = FALSE, fig.width=16, fig.height=16}
+
+# INDIVIDUAL SUBJECTS
+library(gridExtra)
+
+# First plot: Normal condition - separate plots for each subject
+df_normal_individuals <- df %>%
+  filter(Condition == "Normal") %>%
+  filter(QuestionIndex %in% as.factor(13:1)) %>%
+  mutate(VideoMode = factor(VideoMode, levels = c("Mono", "Stereo")))
+
+p_normal_individuals <- ggplot(df_normal_individuals, 
+    aes(x = QuestionIndex, y = QuestionAnswer, fill = QuestionIndex)) +
+  geom_bar(stat = "identity", position = position_dodge(), alpha = 0.6) +
+  scale_fill_manual(values = question_colors) +
+  facet_wrap(~ Id + VideoMode, ncol = 2) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Normal Condition: Mono vs Stereo",
+    x = "Question Index",
+    y = "Response")
+
+# Second plot: Hallucinations condition - separate plots for each subject
+df_hallucinations_individuals <- df %>%
+  filter(Condition == "Hallucinations") %>%
+  filter(QuestionIndex %in% as.factor(13:1)) %>%
+  mutate(VideoMode = factor(VideoMode, levels = c("Mono", "Stereo")))
+
+p_hallucinations_individuals <- ggplot(df_hallucinations_individuals, 
+    aes(x = QuestionIndex, y = QuestionAnswer, fill = QuestionIndex)) +
+  geom_bar(stat = "identity", position = position_dodge(), alpha = 0.6) +
+  scale_fill_manual(values = question_colors) +
+  facet_wrap(~ Id + VideoMode, ncol = 2) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Hallucinations Condition: Mono vs Stereo",
+    x = "Question Index",
+    y = "Response"
+  )
+
+# Arrange plots side by side
+grid.arrange(p_normal_individuals, p_hallucinations_individuals, ncol = 2)
+
+```
+
+<br>
+**3. Questions Overview (Radar plot)**  [S3](#S3)
+
+<a name="S3"></a>
+&nbs
+
+```{r, warning = FALSE, fig.width=10, fig.height=10}
+
+# Define custom colors for questions
+question_colors <- c(
+  "1" = "#440154", "2" = "#7D1322", "3" = "#b08d02", 
+  "4" = "#44C665", "5" = "#44C665", 
+  "6" = "#22A785", "7" = "#22A785", "8" = "#22A785", 
+  "9" = "#25848E", "10" = "#25848E", "11" = "#25848E", "12" = "#7AC936", "13" = "#7AC936"
+)
+
+# Convert RGB to RGBA and then to hexadecimal with transparency
+# Function to convert color to hex with transparency
+add_transparency <- function(color, alpha = 0.3) {
+  rgb_vals <- col2rgb(color)
+  rgba_color <- rgb(rgb_vals[1], rgb_vals[2], rgb_vals[3], maxColorValue = 255, alpha = alpha)
+  return(rgba_color)
+}
+
+# Apply transparency for Mono
+question_colors_mono <- sapply(question_colors, add_transparency)
+
+# Define labels for QuestionIndex
+question_labels <- c(
+  "1" = "Visual alteration", 
+  "2" = "Presence", 
+  "3" = "Engagement", 
+  "4" = "Emotion Intensity", 
+  "5" = "Spiritual", 
+  "6" = "Self-1", 
+  "7" = "Self-2", 
+  "8" = "Self-3", 
+  "9" = "Time-1", 
+  "10" = "Time-2", 
+  "11" = "Time-3", 
+  "12" = "Ineffability",
+  "13" = "Inaccessibility"
+)
+
+# Prepare data for Normal and Hallucinations condition, separating by VideoMode
+df_radar_normal <- df %>%
+  filter(Condition == "Normal") %>%
+  filter(QuestionIndex %in% as.factor(1:13)) %>%
+  group_by(VideoMode, QuestionIndex) %>%
+  summarise(AverageAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop")
+
+df_radar_hallucinations <- df %>%
+  filter(Condition == "Hallucinations") %>%
+  filter(QuestionIndex %in% as.factor(1:13)) %>%
+  group_by(VideoMode, QuestionIndex) %>%
+  summarise(AverageAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop")
+
+# Manually assign colors
+df_radar_normal <- df_radar_normal %>%
+  mutate(Color = ifelse(VideoMode == "Stereo", question_colors[as.character(QuestionIndex)], question_colors_mono[as.character(QuestionIndex)]))
+
+df_radar_hallucinations <- df_radar_hallucinations %>%
+  mutate(Color = ifelse(VideoMode == "Stereo", question_colors[as.character(QuestionIndex)], question_colors_mono[as.character(QuestionIndex)]))
+
+# Plot for Normal Condition
+p_radar_normal <- ggplot(df_radar_normal, aes(x = factor(QuestionIndex), y = AverageAnswer, fill = Color)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 1) +
+  coord_polar(start = -0.25, clip = "off") +   
+  scale_fill_identity() +
+  scale_x_discrete(labels = question_labels) +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 25)) +
+  facet_wrap(~ VideoMode, ncol = 2) +
+  theme_minimal() +
+  labs(
+    title = "Normal Videos",
+    x = NULL,
+    y = "Average Answer"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 9),
+    legend.position = "none",
+    strip.text = element_text(size = 14),
+    strip.background = element_blank(),
+    plot.margin = margin(1.5, 2.5, 1.5, 2.5, "cm"),  # Increased all margins
+    panel.spacing = unit(0.5, "cm"),
+    panel.spacing.x = unit(1, "cm"),  # Added extra horizontal spacing between panels
+    plot.background = element_rect(fill = "white", color = NA)  # Ensure white background
+  )
+
+# Plot for Hallucinations Condition
+p_radar_hallucinations <- ggplot(df_radar_hallucinations, aes(x = factor(QuestionIndex), y = AverageAnswer, fill = Color)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 1) +
+  coord_polar(start = -0.25, clip = "off") + 
+  scale_fill_identity() +
+  scale_x_discrete(labels = question_labels) +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 25)) +
+  facet_wrap(~ VideoMode, ncol = 2) +
+  theme_minimal() +
+  labs(
+    title = "Deep-Dream Videos",
+    x = NULL,
+    y = "Average Answer"
+  ) +
+  theme(
+    axis.text.x = element_text(size = 9),
+    legend.position = "none",
+    strip.text = element_text(size = 14),
+    strip.background = element_blank(),
+    plot.margin = margin(1.5, 2.5, 1.5, 2.5, "cm"),  # Increased all margins
+    panel.spacing = unit(0.5, "cm"),
+    panel.spacing.x = unit(1, "cm"),  # Added extra horizontal spacing between panels
+    plot.background = element_rect(fill = "white", color = NA)  # Ensure white background
+  )
+
+# Print the plots
+print(p_radar_normal)
+print(p_radar_hallucinations)
+
+### Export 9.8 x 9.8
+
+
+# First plot: Normal condition - all responses for distribution
+df_violin_normal <- df %>%
+  filter(Condition == "Normal") %>%  
+  filter(QuestionIndex %in% as.factor(13:1)) %>%  
+  mutate(VideoMode = factor(VideoMode, levels = c("Mono", "Stereo")))
+
+# Create violin plot - Normal condition
+p_normal <- df_violin_normal %>%
+  ggplot(aes(x = QuestionAnswer, y = QuestionIndex, fill = QuestionIndex)) +
+  geom_violin(scale = "width", trim = TRUE) +
+  # Add box plot inside violin for additional statistics
+  geom_boxplot(width = 0.2, alpha = 0.5, color = "white") +
+  scale_fill_manual(values = question_colors) +
+  facet_wrap(~ VideoMode, ncol = 2) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Normal Condition: Mono vs Stereo (Response Distribution)",
+    x = "Response",
+    y = "Question Index"
+  ) +
+  theme(
+    legend.position = "none",
+    panel.spacing = unit(2, "cm"),
+    plot.margin = margin(1, 1, 1, 1, "cm")
+  )
+
+print(p_normal)
+
+# Second plot: Hallucinations condition - all responses for distribution
+df_violin_hallucinations <- df %>%
+  filter(Condition == "Hallucinations") %>%
+  filter(QuestionIndex %in% as.factor(13:1)) %>%
+  mutate(VideoMode = factor(VideoMode, levels = c("Mono", "Stereo")))
+
+# Create violin plot - Hallucinations condition
+p_hallucinations <- df_violin_hallucinations %>%
+  ggplot(aes(x = QuestionAnswer, y = QuestionIndex, fill = QuestionIndex)) +
+  geom_violin(scale = "width", trim = TRUE) +
+  # Add box plot inside violin for additional statistics
+  geom_boxplot(width = 0.2, alpha = 0.5, color = "white") +
+  scale_fill_manual(values = question_colors) +
+  facet_wrap(~ VideoMode, ncol = 2) +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Hallucinations Condition: Mono vs Stereo (Response Distribution)",
+    x = "Response",
+    y = "Question Index"
+  ) +
+  theme(
+    legend.position = "none",
+    panel.spacing = unit(2, "cm"),
+    plot.margin = margin(1, 1, 1, 1, "cm")
+  )
+
+print(p_hallucinations)
+
+
+```
+
+
+<br>
+**4.  Questions Analysis (1-13)**  [S4](#S4)
+
+<a name="S4"></a>
+&nbsp;
+
+```{r, warning = FALSE, fig.width=10, fig.height=4.5}
+
+### SECTION 2: Individual Questions Analysis ###
+
+# Function to run all tests for a single question
+analyze_question <- function(question_num, condition_type, data) {
+  # Filter data for specific question and condition
+  q_data <- data %>%
+    filter(QuestionIndex == question_num, Condition == condition_type) %>%
+    select(Id, VideoMode, QuestionAnswer) %>%
+    pivot_wider(names_from = VideoMode, values_from = QuestionAnswer)
+  
+  # Run tests
+  shapiro_mono <- shapiro.test(q_data$Mono)
+  shapiro_stereo <- shapiro.test(q_data$Stereo)
+  t_test <- t.test(q_data$Mono, q_data$Stereo, paired = TRUE)
+  wilcox_test <- wilcox.test(q_data$Mono, q_data$Stereo, paired = TRUE)
+  
+  # Calculate effect size
+  cohens_d <- mean(q_data$Stereo - q_data$Mono, na.rm = TRUE) / 
+              sd(q_data$Stereo - q_data$Mono, na.rm = TRUE)
+  
+  # Return results
+  return(list(
+    means = c(mean(q_data$Mono, na.rm = TRUE), mean(q_data$Stereo, na.rm = TRUE)),
+    shapiro = c(shapiro_mono$p.value, shapiro_stereo$p.value),
+    t_test = t_test,
+    wilcox = wilcox_test,
+    cohens_d = cohens_d
+  ))
+}
+
+# Run analysis for all questions in both conditions
+questions <- 1:13
+conditions <- c("Normal", "Hallucinations")
+
+# Function to format p-value with stars
+format_p_value <- function(p) {
+  stars <- if (p < 0.001) "***"
+  else if (p < 0.01) "**"
+  else if (p < 0.05) "*"
+  else "ns"
+  
+  return(sprintf("%.4f %s", p, stars))
+}
+
+for (condition in conditions) {
+  cat("\n\n", paste(rep("=", 80), collapse = ""))
+  cat(sprintf("\n%s CONDITION\n", toupper(condition)))
+  cat(paste(rep("=", 80), collapse = ""), "\n")
+  
+  for (q in questions) {
+    results <- analyze_question(q, condition, df)
+    
+    cat("\n", paste(rep("-", 60), collapse = ""))
+    cat(sprintf("\nQuestion %d Analysis\n", q))
+    cat(paste(rep("-", 60), collapse = ""), "\n\n")
+    
+    # Descriptive Statistics
+    cat("DESCRIPTIVE STATISTICS:\n")
+    cat(sprintf("Mono:   Mean = %.2f, SD = %.2f\n", 
+                results$means[1], results$sd[1]))
+    cat(sprintf("Stereo: Mean = %.2f, SD = %.2f\n\n", 
+                results$means[2], results$sd[2]))
+    
+    # Normality Tests
+    cat("NORMALITY TESTS (Shapiro-Wilk):\n")
+    cat(sprintf("Mono:   W = %.3f, p = %s\n", 
+                results$shapiro_stats[1], format_p_value(results$shapiro[1])))
+    cat(sprintf("Stereo: W = %.3f, p = %s\n\n",
+                results$shapiro_stats[2], format_p_value(results$shapiro[2])))
+    
+    # Statistical Tests
+    cat("STATISTICAL TESTS:\n")
+    cat("1. T-Test (Paired):\n")
+    cat(sprintf("   t = %.3f, df = %d, p = %s\n", 
+                results$t_test$statistic, 
+                results$t_test$parameter,
+                format_p_value(results$t_test$p.value)))
+    
+    cat("\n2. Wilcoxon Signed-Rank Test:\n")
+    cat(sprintf("   V = %.0f, p = %s\n",
+                results$wilcox$statistic,
+                format_p_value(results$wilcox$p.value)))
+    
+    # Effect Size
+    cat("\nEFFECT SIZE:\n")
+    cat(sprintf("Cohen's d = %.3f\n", results$cohens_d))
+    
+    # Effect Size Interpretation
+    effect_size_interp <- if (abs(results$cohens_d) < 0.2) "negligible"
+    else if (abs(results$cohens_d) < 0.5) "small"
+    else if (abs(results$cohens_d) < 0.8) "medium"
+    else "large"
+    
+    cat(sprintf("Interpretation: %s effect size\n", effect_size_interp))
+    cat("\n")
+  }
+}
+
+# Create visualization for individual questions
+question_colors_mono <- c(
+  "1" = "#440154", "2" = "#7D1322", "3" = "#b08d02", 
+  "4" = "#44C665", "5" = "#44C665", 
+  "6" = "#22A785", "7" = "#22A785", "8" = "#22A785", 
+  "9" = "#25848E", "10" = "#25848E", "11" = "#25848E", "12" = "#7AC936", "13" = "#7AC936"
+)
+
+question_colors_mono <- sapply(question_colors_mono, function(x) {
+ rgb(t(col2rgb(x)/255), alpha = 0.4)
+})
+
+df_summary <- df %>%
+ group_by(Condition, VideoMode, QuestionIndex) %>%
+ summarise(
+   mean = mean(QuestionAnswer, na.rm = TRUE),
+   se = sd(QuestionAnswer, na.rm = TRUE) / sqrt(n()),
+   .groups = "drop"
+ ) %>%
+ mutate(
+   Condition = factor(Condition, 
+                     levels = c("Normal", "Hallucinations"),
+                     labels = c("Normal Videos", "Deep-Dream Videos")),
+   VideoMode = factor(VideoMode, levels = c("Mono", "Stereo")),
+   Color = case_when(
+     VideoMode == "Stereo" ~ question_colors[as.character(QuestionIndex)],
+     VideoMode == "Mono" ~ question_colors_mono[as.character(QuestionIndex)]
+   )
+ )
+
+ggplot(df_summary, aes(x = QuestionIndex, y = mean, fill = Color)) +
+ geom_bar(stat = "identity", position = position_dodge(0.9)) +
+ geom_errorbar(aes(ymin = mean - se, ymax = mean + se),
+               position = position_dodge(0.9), width = 0.25) +
+ facet_wrap(~Condition) +
+ theme_minimal() +
+ scale_fill_identity() +
+ labs(title = "Individual Questions: Stereo vs Mono",
+      x = "Question Number",
+      y = "Mean Score (± SE)")
+
+# export 10 x 4.5
+
+
+```
+
+<br>
+
+
+**5. ASC Index Analysis**  [S5](#S5)
+
+<a name="S5"></a>
+&nbsp;
+
+
+```{r, fig.height= 4.5, fig.width= 6}
+
+### SECTION 1: Data Preparation and ANOVA 2 x 2 ###
+
+df_ASC <- df %>%
+ mutate(QuestionIndex = as.numeric(as.character(QuestionIndex))) %>%
+ filter(QuestionIndex >= 4 & QuestionIndex <= 13) %>%
+ group_by(Id, Condition, VideoMode) %>%
+ summarise(ASC_score = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop")
+
+
+### SECTION 1: Two-way repeated measures ANOVA ###
+
+# Prepare data
+dt <- df_ASC %>%
+ group_by(Id) %>%
+ mutate(
+   Condition = factor(Condition, levels = c("Normal", "Hallucinations")),
+   VideoMode = factor(VideoMode, levels = c("Mono", "Stereo"))
+ )
+
+# Run ANOVA with effect sizes
+m <- aov_ez(
+ id = "Id", 
+ dv = "ASC_score",
+ within = c("Condition", "VideoMode"),
+ data = dt,
+ return = "nice"
+)
+print(m)
+
+# Detailed ANOVA results
+m_detailed <- aov_ez(
+ id = "Id",
+ dv = "ASC_score",
+ within = c("Condition", "VideoMode"),
+ data = dt
+)
+summary(m_detailed)
+
+# Estimated marginal means
+em <- emmeans(m_detailed, ~ Condition * VideoMode)
+print(em)
+
+# Post-hoc comparisons 
+em_pairs <- pairs(em, adjust = "none")
+print(em_pairs)
+
+# Bonferroni correction
+p_val <- as.data.frame(em_pairs)
+p_val$p.value <- p_val$p.value * 4  # Correcting for 4 comparisons
+p_val$p.value[p_val$p.value > 1] <- 1
+print(p_val)
+
+
+
+### SECTION 2: STEREO VS MONO ###
+
+# Plot 1: Mono vs Stereo
+p1 <- ggplot(df_ASC, aes(x = VideoMode, y = ASC_score, fill = VideoMode)) +
+ geom_violin(alpha = 0.5) +
+ geom_boxplot(width = 0.2, alpha = 0.5) +
+ geom_point(position = position_jitter(width = 0.15), size = 2, alpha = 0.6) +
+ facet_wrap(~Condition, labeller = labeller(Condition = c("Normal" = "Normal Videos",
+                                                         "Hallucinations" = "Deep-Dream Videos"))) +
+ theme_minimal() +
+ scale_fill_manual(values = c("Mono" = "#440154", "Stereo" = "#22A785")) +
+ labs(title = "ASC Score Comparison (Q4-Q13): Mono vs Stereo",
+      y = "ASC Score",
+      x = "Video Mode") +
+ theme(legend.position = "none",
+       plot.title = element_text(size = 14, face = "bold"),
+       axis.title = element_text(size = 12),
+       axis.text = element_text(size = 10),
+       strip.text = element_text(size = 12, face = "bold"))
+
+print(p1)
+
+# Mono vs Stereo Analysis
+# Normal condition
+normal_ASC <- df_ASC %>%
+ filter(Condition == "Normal") %>%
+ pivot_wider(names_from = VideoMode, values_from = ASC_score)
+
+# Test normality and run analyses for Normal condition
+cat("\nNORMAL CONDITION - ASC Score:\n")
+cat("------------------------\n")
+cat("Shapiro-Wilk test results:\n")
+cat("Mono:", shapiro.test(normal_ASC$Mono)$p.value, "\n")
+cat("Stereo:", shapiro.test(normal_ASC$Stereo)$p.value, "\n")
+
+normal_ttest <- t.test(normal_ASC$Mono, normal_ASC$Stereo, paired = TRUE)
+normal_wilcox <- wilcox.test(normal_ASC$Mono, normal_ASC$Stereo, paired = TRUE)
+normal_d <- mean(normal_ASC$Stereo - normal_ASC$Mono, na.rm = TRUE) / 
+           sd(normal_ASC$Stereo - normal_ASC$Mono, na.rm = TRUE)
+
+cat("\nResults:\n")
+cat("Mono mean:", mean(normal_ASC$Mono, na.rm = TRUE), "\n")
+cat("Stereo mean:", mean(normal_ASC$Stereo, na.rm = TRUE), "\n")
+cat("T-test - t-value:", normal_ttest$statistic, "p-value:", normal_ttest$p.value, "\n")
+cat("Wilcoxon test - V:", normal_wilcox$statistic, "p-value:", normal_wilcox$p.value, "\n")
+cat("Cohen's d:", normal_d, "\n")
+
+# Hallucinations condition
+hallucinations_ASC <- df_ASC %>%
+ filter(Condition == "Hallucinations") %>%
+ pivot_wider(names_from = VideoMode, values_from = ASC_score)
+
+cat("\nHALLUCINATIONS CONDITION - ASC Score:\n")
+cat("--------------------------------\n")
+cat("Shapiro-Wilk test results:\n")
+cat("Mono:", shapiro.test(hallucinations_ASC$Mono)$p.value, "\n")
+cat("Stereo:", shapiro.test(hallucinations_ASC$Stereo)$p.value, "\n")
+
+hallucinations_ttest <- t.test(hallucinations_ASC$Mono, hallucinations_ASC$Stereo, paired = TRUE)
+hallucinations_wilcox <- wilcox.test(hallucinations_ASC$Mono, hallucinations_ASC$Stereo, paired = TRUE)
+hallucinations_d <- mean(hallucinations_ASC$Stereo - hallucinations_ASC$Mono, na.rm = TRUE) / 
+                  sd(hallucinations_ASC$Stereo - hallucinations_ASC$Mono, na.rm = TRUE)
+
+cat("\nResults:\n")
+cat("Mono mean:", mean(hallucinations_ASC$Mono, na.rm = TRUE), "\n")
+cat("Stereo mean:", mean(hallucinations_ASC$Stereo, na.rm = TRUE), "\n")
+cat("T-test - t-value:", hallucinations_ttest$statistic, "p-value:", hallucinations_ttest$p.value, "\n")
+cat("Wilcoxon test - V:", hallucinations_wilcox$statistic, "p-value:", hallucinations_wilcox$p.value, "\n")
+cat("Cohen's d:", hallucinations_d, "\n")
+
+### SECTION 3: Normal vs Hallucinations Analysis ###
+
+# Plot 2: Normal vs Hallucinations
+df_ASC_cond <- df_ASC %>%
+ mutate(Condition = factor(Condition, 
+                          levels = c("Normal", "Hallucinations"),
+                          labels = c("Normal Videos", "Deep-Dream Videos")))
+
+p2 <- ggplot(df_ASC_cond, aes(x = Condition, y = ASC_score, fill = Condition)) +
+ geom_violin(alpha = 0.5) +
+ geom_boxplot(width = 0.2, alpha = 0.5) +
+ geom_point(position = position_jitter(width = 0.15), size = 2, alpha = 0.6) +
+ facet_wrap(~VideoMode) +
+ theme_minimal() +
+ scale_fill_manual(values = c("Normal Videos" = "grey30", "Deep-Dream Videos" = "#4F80C9")) +
+ labs(title = "ASC Score: Normal vs Deep-Dream",
+      y = "ASC Score",
+      x = "Condition") +
+ theme(legend.position = "none",
+       plot.title = element_text(size = 14, face = "bold"),
+       axis.title = element_text(size = 12),
+       axis.text = element_text(size = 10),
+       strip.text = element_text(size = 12, face = "bold"))
+
+print(p2)
+
+# Analysis for Mono condition
+mono_comparison <- df_ASC %>%
+ filter(VideoMode == "Mono") %>%
+ pivot_wider(names_from = Condition, values_from = ASC_score)
+
+cat("\nMONO CONDITION - Normal vs Hallucinations:\n")
+cat("----------------------------------------\n")
+cat("Shapiro-Wilk test results:\n")
+cat("Normal:", shapiro.test(mono_comparison$Normal)$p.value, "\n")
+cat("Hallucinations:", shapiro.test(mono_comparison$Hallucinations)$p.value, "\n")
+
+mono_ttest <- t.test(mono_comparison$Normal, mono_comparison$Hallucinations, paired = TRUE)
+mono_wilcox <- wilcox.test(mono_comparison$Normal, mono_comparison$Hallucinations, paired = TRUE)
+mono_d <- mean(mono_comparison$Hallucinations - mono_comparison$Normal, na.rm = TRUE) / 
+         sd(mono_comparison$Hallucinations - mono_comparison$Normal, na.rm = TRUE)
+
+cat("\nResults:\n")
+cat("Normal mean:", mean(mono_comparison$Normal, na.rm = TRUE), "\n")
+cat("Hallucinations mean:", mean(mono_comparison$Hallucinations, na.rm = TRUE), "\n")
+cat("T-test - t-value:", mono_ttest$statistic, "p-value:", mono_ttest$p.value, "\n")
+cat("Wilcoxon test - V:", mono_wilcox$statistic, "p-value:", mono_wilcox$p.value, "\n")
+cat("Cohen's d:", mono_d, "\n")
+
+# Analysis for Stereo condition
+stereo_comparison <- df_ASC %>%
+ filter(VideoMode == "Stereo") %>%
+ pivot_wider(names_from = Condition, values_from = ASC_score)
+
+cat("\nSTEREO CONDITION - Normal vs Hallucinations:\n")
+cat("----------------------------------------\n")
+cat("Shapiro-Wilk test results:\n")
+cat("Normal:", shapiro.test(stereo_comparison$Normal)$p.value, "\n")
+cat("Hallucinations:", shapiro.test(stereo_comparison$Hallucinations)$p.value, "\n")
+
+stereo_ttest <- t.test(stereo_comparison$Normal, stereo_comparison$Hallucinations, paired = TRUE)
+stereo_wilcox <- wilcox.test(stereo_comparison$Normal, stereo_comparison$Hallucinations, paired = TRUE)
+stereo_d <- mean(stereo_comparison$Hallucinations - stereo_comparison$Normal, na.rm = TRUE) / 
+           sd(stereo_comparison$Hallucinations - stereo_comparison$Normal, na.rm = TRUE)
+
+cat("\nResults:\n")
+cat("Normal mean:", mean(stereo_comparison$Normal, na.rm = TRUE), "\n")
+cat("Hallucinations mean:", mean(stereo_comparison$Hallucinations, na.rm = TRUE), "\n")
+cat("T-test - t-value:", stereo_ttest$statistic, "p-value:", stereo_ttest$p.value, "\n")
+cat("Wilcoxon test - V:", stereo_wilcox$statistic, "p-value:", stereo_wilcox$p.value, "\n")
+cat("Cohen's d:", stereo_d, "\n")
+
+```
+
+
+**6. Psychometric Analysis**  [S6](#S6)
+
+<a name="S6"></a>
+&nbsp;
+
+```{r, warning = FALSE, message = F}
+
+
+# Overall correlation matrix
+wide_data <- df %>%
+  group_by(Id, QuestionIndex) %>%
+  summarise(QuestionAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    id_cols = Id,
+    names_from = QuestionIndex,
+    values_from = QuestionAnswer
+  )
+
+matrix_data <- as.matrix(wide_data[, -1])
+cor_matrix_overall <- cor(matrix_data, use = "pairwise.complete.obs")
+
+# Normal-Stereo
+ns_wide <- df %>%
+  filter(Condition == "Normal" & VideoMode == "Stereo") %>%
+  group_by(Id, QuestionIndex) %>%
+  summarise(QuestionAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    id_cols = Id,
+    names_from = QuestionIndex,
+    values_from = QuestionAnswer
+  )
+
+ns_matrix <- as.matrix(ns_wide[, -1])
+cor_matrix_ns <- cor(ns_matrix, use = "pairwise.complete.obs")
+
+# Hallucination-Stereo
+hs_wide <- df %>%
+  filter(Condition == "Hallucinations" & VideoMode == "Stereo") %>%
+  group_by(Id, QuestionIndex) %>%
+  summarise(QuestionAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(
+    id_cols = Id,
+    names_from = QuestionIndex,
+    values_from = QuestionAnswer
+  )
+
+hs_matrix <- as.matrix(hs_wide[, -1])
+cor_matrix_hs <- cor(hs_matrix, use = "pairwise.complete.obs")
+
+# Define color breaks to ensure white at zero
+breaksList <- seq(-1, 1, length.out = 51)
+
+# Create a function to generate both plots
+create_plot_pair <- function(cor_matrix, title_base) {
+  # Ordered plot
+  ordered <- pheatmap(cor_matrix,
+           main = paste(title_base, "(Ordered)"),
+           color = colorRampPalette(c("navy", "white", "deeppink4"))(50),
+           breaks = breaksList,
+           cluster_rows = FALSE,
+           cluster_cols = FALSE,
+           border_color = NA,
+           fontsize = 9,
+           fontsize_row = 9.4,
+           fontsize_col = 9.4,
+           font.style.row = "bold",
+           font.style.col = "bold",
+           silent = TRUE)
+  
+  # Clustered plot
+  clustered <- pheatmap(cor_matrix,
+           main = paste(title_base, "(Clustered)"),
+           color = colorRampPalette(c("navy", "white", "deeppink4"))(50),
+           breaks = breaksList,
+           clustering_distance_rows = "euclidean",
+           clustering_distance_cols = "euclidean",
+           clustering_method = "complete",
+           border_color = NA,
+           fontsize = 9,
+           fontsize_row = 9.4,
+           fontsize_col = 9.4,
+           font.style.row = "bold",
+           font.style.col = "bold",
+           silent = TRUE)
+  
+  return(list(ordered = ordered, clustered = clustered))
+}
+
+# Create all plot pairs
+overall_plots <- create_plot_pair(cor_matrix_overall, "Overall Correlations")
+ns_plots <- create_plot_pair(cor_matrix_ns, "Normal-Stereo Correlations")
+hs_plots <- create_plot_pair(cor_matrix_hs, "Hallucination-Stereo Correlations")
+
+# Arrange all plots in a grid
+pdf("correlation_heatmaps_combined.pdf", width = 13.5, height = 18)
+grid.arrange(
+  overall_plots$ordered[[4]], overall_plots$clustered[[4]],
+  ns_plots$ordered[[4]], ns_plots$clustered[[4]],
+  hs_plots$ordered[[4]], hs_plots$clustered[[4]],
+  ncol = 2, nrow = 3
+)
+dev.off()
+
+
+
+# First, create separate datasets for each condition
+df_clean <- df %>%
+  group_by(Id, QuestionIndex, Condition) %>%
+  summarise(QuestionAnswer = mean(QuestionAnswer, na.rm = TRUE), .groups = "drop")
+
+# Create wide format for each condition
+normal_wide <- df_clean %>%
+  filter(Condition == "Normal") %>%
+  pivot_wider(
+    id_cols = Id,
+    names_from = QuestionIndex,
+    values_from = QuestionAnswer
+  )
+
+hallucination_wide <- df_clean %>%
+  filter(Condition == "Hallucinations") %>%
+  pivot_wider(
+    id_cols = Id,
+    names_from = QuestionIndex,
+    values_from = QuestionAnswer
+  )
+
+# Function to analyze one condition
+analyze_condition <- function(data, condition_name) {
+  # Select items
+  independent_items <- data %>% select(all_of(c("1", "2", "3")))
+  factor_items <- data %>% select(all_of(as.character(4:13)))
+  
+  # Reliability Analysis
+  reliability <- psych::alpha(factor_items)
+  cat(sprintf("\n\n=== %s Condition Analysis ===\n", condition_name))
+  cat("\nReliability Analysis (Cronbach's alpha):")
+  print(reliability$total)
+  cat("\nItem statistics:")
+  print(reliability$item.stats)
+  
+  # Factor score
+  factor_score <- rowMeans(factor_items, na.rm = TRUE)
+  
+  # Correlation analysis
+  analysis_df <- cbind(independent_items, factor_score)
+  cor_matrix <- cor(analysis_df, use = "pairwise.complete.obs")
+  cat("\nCorrelations between independent items and factor score:")
+  print(cor_matrix)
+  
+  # Create heatmaps
+  pheatmap(cor_matrix,
+           main = paste(condition_name, "Condition - Correlation Matrix (Ordered)"),
+           color = colorRampPalette(c("navy", "white", "deeppink4"))(50),
+           breaks = seq(-1, 1, length.out = 51),
+           cluster_rows = FALSE,
+           cluster_cols = FALSE,
+           border_color = NA,
+           display_numbers = TRUE,
+           number_format = "%.2f",
+           fontsize = 9,
+           fontsize_row = 9.4,
+           fontsize_col = 9.4,
+           fontsize_number = 9,
+           font.style.row = "bold",
+           font.style.col = "bold")
+  
+  pheatmap(cor_matrix,
+           main = paste(condition_name, "Condition - Correlation Matrix (Clustered)"),
+           color = colorRampPalette(c("navy", "white", "deeppink4"))(50),
+           breaks = seq(-1, 1, length.out = 51),
+           clustering_distance_rows = "euclidean",
+           clustering_distance_cols = "euclidean",
+           clustering_method = "complete",
+           border_color = NA,
+           display_numbers = TRUE,
+           number_format = "%.2f",
+           fontsize = 9,
+           fontsize_row = 9.4,
+           fontsize_col = 9.4,
+           fontsize_number = 9,
+           font.style.row = "bold",
+           font.style.col = "bold")
+  
+  # Descriptive Statistics
+  cat("\nDescriptive Statistics for Independent Items:")
+  print(describe(independent_items))
+  cat("\nDescriptive Statistics for Factor Items:")
+  print(describe(factor_items))
+  
+  return(list(
+    reliability = reliability,
+    correlations = cor_matrix,
+    desc_independent = describe(independent_items),
+    desc_factor = describe(factor_items)
+  ))
+}
+
+# Analyze each condition
+normal_results <- analyze_condition(normal_wide, "Normal")
+hallucination_results <- analyze_condition(hallucination_wide, "Hallucination")
+
+# Compare reliability between conditions
+cat("\n\nReliability Comparison:")
+cat("\nNormal Condition alpha:", normal_results$reliability$total$raw_alpha)
+cat("\nHallucination Condition alpha:", hallucination_results$reliability$total$raw_alpha)
+
+# Compare correlations
+cat("\n\nCorrelation Pattern Differences:")
+cat("\nDifference in correlations (Hallucination - Normal):")
+print(hallucination_results$correlations - normal_results$correlations)
+```
+

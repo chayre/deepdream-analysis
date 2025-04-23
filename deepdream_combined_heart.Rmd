@@ -104,7 +104,7 @@ clean_consecutive_rr <- function(data) {
 
 ```{r warning=FALSE, message=FALSE}
 # Import ECG data
-import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
+import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
   # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
   file_list <- list.files(
     path = here(data_dir),
@@ -128,7 +128,7 @@ import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\
   return(data)
 }
 
-import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\pre-study\\ECG\\ACQ") {
+import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
   # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
   file_list <- list.files(
     path = here(data_dir),
@@ -195,7 +195,7 @@ data_base_processed <- clean_consecutive_rr(data_base_processed)
 
 ```{r warning=FALSE, message=FALSE}
 # Define file paths
-file_paths <- list.files(path = "pre-study", pattern = "_QuestionsData.csv", full.names = TRUE)
+file_paths <- list.files(path = "Study_01", pattern = "_QuestionsData.csv", full.names = TRUE)
 
 # Import CSV files and combine them into a single data frame
 questions_combined <- bind_rows(lapply(file_paths, read_csv2))
@@ -1475,7 +1475,7 @@ print(rmcorr_result_BaselineMeanHR_ASC)
 
 ```{r warning=FALSE, message=FALSE}
 # Define file paths
-file_paths <- list.files(path = "pre-study", pattern = "_DeviceData.csv", full.names = TRUE)
+file_paths <- list.files(path = "Study_01", pattern = "_DeviceData.csv", full.names = TRUE)
 
 # Import CSV files and combine them into a single data frame
 device_combined <- bind_rows(lapply(file_paths, read_csv2))
@@ -1503,7 +1503,7 @@ mean_pupil_size_df <- condensed_device_combined %>%
   )
 
 # Define file paths
-file_paths <- list.files(path = "pre-study", pattern = "_Baseline.csv", full.names = TRUE)
+file_paths <- list.files(path = "Study_01", pattern = "_Baseline.csv", full.names = TRUE)
 
 # Import CSV files and combine them into a single data frame
 baseline_combined <- bind_rows(lapply(file_paths, read_csv2))
