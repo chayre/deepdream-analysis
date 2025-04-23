@@ -1,0 +1,1602 @@
+---
+title: "Study 01 - Subjects Combined ECG Analysis"
+author:    |
+    | Colin Ayres  
+    | c.ayres@student.uw.edu.pl
+date: "April 2025"
+output: html_document
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages
+
+```{r warning=FALSE, message=FALSE}
+# Load packages
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(zoo)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+library(ggpubr)
+library(rstatix)
+library(readr)
+library(gridExtra)
+library(rmcorr) 
+library(lme4)
+library(lmerTest)
+library(broom)
+library(purrr)
+library(reticulate)
+
+# Set working directory
+mds_dir <- here::here()
+
+```
+
+## Defining Functions to Clean & Combine Data
+
+```{r}
+# Remove rows for which Heart Rate is 0
+remove_zero_heart_rate <- function(data) {
+  data %>% 
+    filter(`Heart Rate` != 0)
+}
+
+# Add Time column (1000 rows = 1 second)
+add_time_column <- function(data) {
+  data %>%
+    group_by(Id) %>%
+    mutate(Time = (row_number() - 1) / 1000) %>%  # Convert row number to seconds
+    ungroup()
+}
+
+# Change 4 and 8 events which are repeated to 0 (i.e. If event column has 4, 4, 4 -> 4, 0, 0)
+clean_repeated_events <- function(data) {
+  data %>%
+    arrange(Id, Time) %>% 
+    group_by(Id) %>%
+    mutate(
+      # Track time differences and event changes
+      time_diff = Time - lag(Time, default = -Inf),
+      event_changed = EVENT != lag(EVENT, default = first(EVENT)),
+      
+      # Identify new clusters of 4/8
+      cluster = cumsum(
+        (EVENT %in% c(4, 8) & (time_diff > 0.5 | event_changed)) |
+          !(EVENT %in% c(4, 8))
+      )
+    ) %>%
+    group_by(Id, cluster) %>%
+    mutate(
+      # Replace repeats with 0 within each cluster
+      EVENT = ifelse(
+        EVENT %in% c(4, 8) & row_number() > 1,
+        0,
+        EVENT
+      )
+    ) %>%
+    ungroup() %>%
+    select(-time_diff, -event_changed, -cluster)  # Remove helper columns
+}
+
+clean_consecutive_rr <- function(data) {
+  data %>%
+    group_by(Id) %>%
+    arrange(Time) %>%
+    mutate(
+      `Clean R-R` = if_else(
+        row_number() == 1 | `ECG R-R` != lag(`ECG R-R`),
+        `ECG R-R`,
+        NA_real_
+      )
+    ) %>%
+    ungroup()
+}
+```
+
+## Load and Process All Subject Data
+
+```{r warning=FALSE, message=FALSE}
+# Import ECG data
+import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
+  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "\\d+_experiment\\.csv",
+    full.names = TRUE
+  )
+
+  # Read and combine all files
+  data <- map_df(file_list, ~ {
+    read_delim(.x, 
+              delim = ";",
+              col_types = cols(.default = col_character()),
+              show_col_types = FALSE) %>%
+      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
+      type_convert()  # Automatically convert columns to appropriate types
+  })
+
+  # Arrange by subject ID
+  data <- data %>% arrange(Id)
+
+  return(data)
+}
+
+import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
+  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
+  file_list <- list.files(
+    path = here(data_dir),
+    pattern = "ID\\d+_baseline\\.csv",
+    full.names = TRUE
+  )
+
+  # Read and combine all files
+  data <- map_df(file_list, ~ {
+    read_delim(.x, 
+              delim = ";",
+              col_types = cols(.default = col_character()),
+              show_col_types = FALSE) %>%
+      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
+      type_convert()  # Automatically convert columns to appropriate types
+  })
+
+  # Arrange by subject ID
+  data <- data %>% arrange(Id)
+
+  return(data)
+}
+
+
+
+process_all_subjects <- function(raw_data) {
+  # Clean column names
+  raw_data <- raw_data %>%
+    #rename_all(~str_trim(.) %>% make.names()) %>%  # Force valid column names
+    rename(Id = matches("^id$", ignore.case = TRUE)) %>%  # Explicitly rename ID column
+    mutate(Id = as.integer(Id))
+  
+  # Verify Id column exists
+  if (!"Id" %in% colnames(raw_data)) {
+    stop("Id column still missing after renaming. Columns found: ",
+         paste(colnames(raw_data), collapse = ", "))
+  }
+  
+  # Process using split-apply-combine
+  raw_data %>%
+    split(.$Id) %>%  # Base R splitting by Id
+    map_dfr(~ {
+      .x %>%
+        add_time_column() %>%
+        remove_zero_heart_rate() %>%
+        clean_repeated_events() %>%
+        mutate(Id = first(Id))  # Explicitly maintain Id column
+    }) %>%
+    arrange(Id)
+}
+
+
+# Execution
+data_exp <- import_subjects_exp()
+data_base <- import_subjects_base()
+
+data_exp_processed <- process_all_subjects(data_exp)
+data_base_processed <- process_all_subjects(data_base)
+data_exp_processed <- clean_consecutive_rr(data_exp_processed)
+data_base_processed <- clean_consecutive_rr(data_base_processed)
+```
+
+## Pulling out Condition Orders for each Subject
+
+```{r warning=FALSE, message=FALSE}
+# Define file paths
+file_paths <- list.files(path = "Study_01", pattern = "_QuestionsData.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+questions_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+condensed_questions_combined <- questions_combined %>%
+  select(Id, VideoName, VideoMode, QuestionIndex, QuestionAnswer) %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName),
+    QuestionIndex = as.factor(QuestionIndex)
+  )
+
+# Table which links condition to section number and ID
+processed_questions_combined <- condensed_questions_combined %>%
+  group_by(Id) %>%
+  arrange(Id, row_number()) %>%
+  mutate(Order = paste(VideoMode, Condition, sep = "_")) %>%
+  summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
+  unnest_longer(Condition_Order) %>%
+  group_by(Id) %>%
+  mutate(Order_Number = row_number()) %>%
+  ungroup()
+
+# Calculate ASC Scores, add questions 1 - 3 answers
+asc_scores <- condensed_questions_combined %>%
+  group_by(Id, VideoMode, VideoName) %>%
+  mutate(ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE)) %>%
+  summarise(
+    ASC_Score = mean(QuestionAnswer[QuestionIndex %in% 4:13], na.rm = TRUE),
+    Q1Answer = QuestionAnswer[QuestionIndex == 1][1],
+    Q2Answer = QuestionAnswer[QuestionIndex == 2][1],
+    Q3Answer = QuestionAnswer[QuestionIndex == 3][1],
+    VideoName = case_when(
+      grepl("Hallucinations", VideoName) ~ "Hallucinations",
+      grepl("Normal", VideoName) ~ "Normal",
+      TRUE ~ as.character(VideoName)
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_"))
+
+# Combining ASC Scores with Condition_Order
+processed_questions_asc <- merge(processed_questions_combined, asc_scores,
+                   by.x = c("Id", "Condition_Order"), 
+                   all.x = TRUE)
+
+```
+
+## Investigating Events
+
+```{r warning=FALSE, message=FALSE}
+plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
+  # Filter data for the given Id and remove EVENT = 0
+  subject_data <- data %>% 
+    filter(Id == subject_id, EVENT != 0)
+  
+  # Create the plot
+  ggplot(subject_data, aes(x = Time, y = EVENT)) +
+    geom_point(color = "red", size = 1, alpha = 0.7) +  # Add points
+    labs(
+      title = paste("EVENTs for Id =", subject_id),
+      x = "Time",
+      y = "EVENT"
+    ) +
+    theme_minimal()
+}
+
+# Execution
+map(1, plot_event_by_frame)  # Only plotting the first subject
+
+```
+
+## Looking Between Events 4 and 8 for Experimental Data
+
+### There are four sections of data per subject that occur between an event 4 and event 8 marker. Ensure there are no extraneous 4 events before proceeding with analysis
+
+```{r}
+# In the experimental data, Subject 2, there is a random event 4 at the start of the data which does not correlate to an event 8 (the next event 8 happens ~1000 seconds later). I'm filtering this out.
+data_exp_processed <- data_exp_processed %>%
+  mutate(
+    EVENT = if_else(
+      Id == 2 & Time == 1.531,  # Match time with tolerance for precision
+      0,  # Replace EVENT with 0
+      EVENT  # Keep original value otherwise
+    )
+  )
+
+# Select only points between events 4 and 8
+filter_between_events <- function(data, start_event = 4, end_event = 8) {
+  data %>%
+    group_by(Id) %>%
+    mutate(
+      start_flag = EVENT == start_event,  # Mark start points
+      end_flag = EVENT == end_event       # Mark end points
+    ) %>%
+    mutate(
+      section_id = cumsum(start_flag),  # Track sections where EVENT == 4 starts
+      valid_section = section_id > lag(cumsum(end_flag), default = 0)  # Ensure pairing
+    ) %>%
+    filter(valid_section) %>%
+    select(-start_flag, -end_flag, -valid_section) %>%
+    ungroup()
+}
+
+# Filter out points between events 4 and 8
+filtered_exp <- filter_between_events(data_exp_processed)
+
+
+# Use the correct Python version
+use_python("C:/Users/CAyre/AppData/Local/Programs/Python/Python313", required = TRUE)
+
+# Load the Python script
+source_python("HR Entropy Pipeline/scripts/HR_Entropy_Pipeline_R_Input.py")
+
+# Import pandas
+pd <- import("pandas")
+
+# Sort dataframe by section and id
+df_sorted <- filtered_exp %>%
+  arrange(section_id, Id)
+
+# Initialize an empty dataframe to store Python results
+python_results <- data.frame(
+  section_id = integer(),
+  Id = integer(),
+  HR_entropy = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Process each section_id & subject_id combination
+unique_combinations <- df_sorted %>%
+  distinct(section_id, Id)
+
+for (i in 1:nrow(unique_combinations)) {
+  section_val <- unique_combinations$section_id[i]
+  subject_val <- unique_combinations$Id[i]
+
+  # Filter data for the specific section and subject
+  df_subset <- df_sorted %>%
+    filter(section_id == section_val, Id == subject_val)
+
+  # Convert to Pandas DataFrame
+  df_py <- r_to_py(df_subset)
+
+  # Run Python function
+  entropy_result <- process_dataframe(df_py)
+
+  # Append results to our dataframe
+  python_results <- rbind(python_results, data.frame(
+    section_id = section_val,
+    Id = subject_val,
+    HR_entropy = entropy_result[2]  # Second element is entropy value
+  ))
+}
+
+# Calculating Mean Heart Rate and Heart Rate Variability in each section (between Event = 4 and Event = 8) for each subject
+hr_results <- filtered_exp %>%
+  filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  group_by(Id, section_id) %>%
+  arrange(Time) %>%
+  summarise(
+    mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    
+    # Improved HRV calculation
+    heart_rate_variability = {
+      clean_rr <- na.omit(`Clean R-R`)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD from consecutive non-NA values
+      } else {
+        NA_real_
+      }
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
+  )
+
+# Merge HR, HRV, and entropy results into a single dataframe
+combined_results <- hr_results %>%
+  left_join(python_results, by = c("Id", "section_id"))
+
+# Join with condition names (processed_questions_combined)
+linked_results <- combined_results %>%
+  left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
+
+# View the final sorted results
+linked_results %>% arrange(Id, section_id)
+
+# Print the final results dataframe
+print(linked_results)
+
+```
+
+## Paired T-Test for Mean Heart Rate, HRV, and HR Entropy
+```{r}
+# Function to run paired t-tests for all combinations of conditions
+run_all_paired_ttests <- function(data) {
+  # Check required columns exist
+  required_cols <- c("Id", "Condition_Order", "mean_heart_rate", "heart_rate_variability", "HR_entropy")
+  if (!all(required_cols %in% colnames(data))) {
+    stop("Missing required columns. Needed: ", paste(required_cols, collapse = ", "))
+  }
+
+  # Create all possible condition pairs
+  conditions <- unique(data$Condition_Order)
+  pairs <- as.data.frame(t(combn(conditions, 2))) %>%
+    setNames(c("condition1", "condition2"))
+
+  # Process both metrics
+  purrr::map_df(c("mean_heart_rate", "heart_rate_variability", "HR_entropy"), function(metric) {
+    purrr::map_df(1:nrow(pairs), function(i) {
+      pair <- pairs[i, ]
+
+      # Prepare paired data for current metric
+      paired_data <- data %>%
+        filter(Condition_Order %in% c(pair$condition1, pair$condition2)) %>%
+        pivot_wider(
+          id_cols = Id,
+          names_from = Condition_Order,
+          values_from = all_of(metric),
+          names_prefix = "condition_"
+        ) %>%
+        na.omit()
+
+      # Skip if insufficient data
+      if (nrow(paired_data) < 2) {
+        return(tibble(
+          metric = metric,
+          comparison = paste(pair$condition1, "vs", pair$condition2),
+          message = "Insufficient data (n < 2)"
+        ))
+      }
+
+      # Perform t-test
+      t.test(
+        paired_data[[paste0("condition_", pair$condition1)]],
+        paired_data[[paste0("condition_", pair$condition2)]],
+        paired = TRUE
+      ) %>%
+        broom::tidy() %>%
+        mutate(
+          metric = metric,
+          comparison = paste(pair$condition1, "vs", pair$condition2),
+          n_pairs = nrow(paired_data),
+          .before = 1
+        )
+    })
+  })
+}
+
+# Execute
+paired_ttest_results <- run_all_paired_ttests(linked_results)
+print(paired_ttest_results)
+
+```
+## Plotting Paired T-test Results (Commented out)
+
+```{r}
+plot_individual_paired_comparisons <- function(data, ttest_results, metric = "mean_heart_rate") {
+  # Filter results for specified metric
+  metric_results <- ttest_results %>%
+    filter(metric == !!metric) %>%
+    mutate(
+      condition1 = sub(" vs.*", "", comparison),
+      condition2 = sub(".*vs ", "", comparison)
+    )
+  
+  # Create list of individual plots
+  plots <- map(1:nrow(metric_results), function(i) {
+    pair <- metric_results[i, ]
+    
+    # Prepare paired data
+    pair_data <- data %>%
+      filter(Condition_Order %in% c(pair$condition1, pair$condition2)) %>%
+      select(Id, Condition_Order, value = all_of(metric)) %>%
+      pivot_wider(
+        names_from = Condition_Order,
+        values_from = value,
+        names_prefix = "Condition_"
+      ) %>%
+      na.omit()
+    
+    # Convert to long format for plotting
+    plot_data <- pair_data %>%
+      pivot_longer(
+        cols = -Id,
+        names_to = "Condition",
+        values_to = "value"
+      ) %>%
+      mutate(Condition = factor(sub("Condition_", "", Condition)))
+    
+    # Create plot
+    ggplot(plot_data, aes(x = Condition, y = value)) +
+      geom_boxplot(aes(fill = Condition), width = 0.3, outlier.shape = NA, alpha = 0.8) +
+      geom_point(color = "gray40", size = 2.5, alpha = 0.7) +
+      geom_line(aes(group = Id), color = "gray60", alpha = 0.5) +
+      scale_fill_brewer(palette = "Set2") +  # ColorBrewer qualitative palette
+      labs(
+        title = paste("Comparison:", pair$comparison),
+        subtitle = paste0("Paired t-test: p = ", round(pair$p.value, 3)),
+        x = "Condition",
+        y = if (metric == "mean_heart_rate") {
+            "Mean Heart Rate (bpm)"
+            } else if (metric == "HR_entropy") {
+            "HR Entropy"
+            } else {
+            "Heart Rate Variability (RMSSD)"
+            },
+          #ifelse(metric == "mean_heart_rate",
+          #         "Mean Heart Rate (bpm)", 
+           #        "Heart Rate Variability (RMSSD)"),
+        fill = "Condition"
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(
+        legend.position = "right",
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(face = "bold"),
+        plot.subtitle = element_text(color = "grey40")
+      )
+  })
+  
+  # Name plots by comparison
+  names(plots) <- metric_results$comparison
+  return(plots)
+}
+
+# Generate individual plots for mean heart rate
+meanhr_plots_ttest <- plot_individual_paired_comparisons(
+  data = linked_results,
+  ttest_results = paired_ttest_results,
+  metric = "mean_heart_rate"
+)
+
+# Generate individual plots for heart rate variability
+hrv_plots_ttest <- plot_individual_paired_comparisons(
+  data = linked_results,
+  ttest_results = paired_ttest_results,
+  metric = "heart_rate_variability"
+)
+
+# Generate individual plots for heart rate variability
+hr_entropy_ttest <- plot_individual_paired_comparisons(
+  data = linked_results,
+  ttest_results = paired_ttest_results,
+  metric = "heart_rate_variability"
+)
+
+# Print all plots (commented out)
+# walk(meanhr_plots_ttest, print)
+# walk(hrv_plots_ttest, print)
+
+
+```
+
+## Plot HR and R-R For All Subjects/Conditions
+
+```{r}
+# Join the mapping with filtered_exp to sync conditions
+filtered_exp_synced <- filtered_exp %>%
+  left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number")) %>%
+  filter(!is.na(`Clean R-R`))  # Remove NA values
+
+# Plotting function
+create_subject_plot_rr <- function(subject_data) {
+  ggplot(subject_data, aes(x = Time, y = `Clean R-R`)) +
+    geom_line(color = "#2c7bb6", linewidth = 0.4) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id)),
+      x = "Time (s)",
+      y = "R-R Interval (s)"
+    ) +
+    theme_minimal() +
+    theme(
+      strip.background = element_rect(fill = "#f5f5f5"),
+      strip.text = element_text(size = 8, face = "bold"),
+      axis.text = element_text(size = 6),
+      plot.title = element_text(size = 10, hjust = 0.5),
+      panel.spacing = unit(0.3, "cm")
+    )
+}
+
+create_subject_plot_hr <- function(subject_data) {
+  ggplot(subject_data, aes(x = Time, y = `Heart Rate`)) +
+    geom_line(color = "#2c7bb6", linewidth = 0.4) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id)),
+      x = "Time (s)",
+      y = "Heart Rate (bpm)"
+    ) +
+    theme_minimal() +
+    theme(
+      strip.background = element_rect(fill = "#f5f5f5"),
+      strip.text = element_text(size = 8, face = "bold"),
+      axis.text = element_text(size = 6),
+      plot.title = element_text(size = 10, hjust = 0.5),
+      panel.spacing = unit(0.3, "cm")
+    )
+}
+
+# Split data by subject and create plots
+hrv_subject_plots <- filtered_exp_synced %>%
+  group_split(Id) %>%
+  map(create_subject_plot_rr)
+
+hr_subject_plots <- filtered_exp_synced %>%
+  group_split(Id) %>%
+  map(create_subject_plot_hr)
+
+# View all plots
+walk(hr_subject_plots, print) 
+walk(hrv_subject_plots, print) 
+
+```
+## Identifying Outliers for HR and HRV
+
+```{r}
+# Old function which used MAD Threshold to identify outliers
+#analyze_metric_outliers <- function(data, metric_col, threshold = 3.5) {
+#  data %>%
+#    group_by(Id, Condition_Order) %>%
+#    mutate(
+#      median_val = median(!!sym(metric_col), na.rm = TRUE),
+#      mad_threshold = threshold * mad(!!sym(metric_col), na.rm = TRUE),
+#      is_outlier = abs(!!sym(metric_col) - median_val) / mad(!!sym(metric_col), na.rm = TRUE) > threshold
+#    ) %>%
+#    ungroup()
+#}
+
+# 40% average threshold to identify outliers
+analyze_metric_outliers <- function(data, metric_col) {
+  data %>%
+    group_by(Id, Condition_Order) %>%
+    mutate(
+      avg_val = mean(!!sym(metric_col), na.rm = TRUE),
+      lower_threshold = 0.6 * avg_val,  # 40% below average
+      upper_threshold = 1.4 * avg_val,  # 40% above average
+      is_outlier = (!!sym(metric_col) < lower_threshold) | (!!sym(metric_col) > upper_threshold)
+    ) %>%
+    ungroup()
+}
+
+# Process both metrics
+filtered_exp_annotated <- filtered_exp_synced %>%
+  analyze_metric_outliers("Clean R-R") %>%  # For HRV (R-R)
+  rename(
+    avg_rr = avg_val,
+    lower_threshold_rr = lower_threshold,
+    upper_threshold_rr = upper_threshold,
+    is_outlier_rr = is_outlier
+  ) %>%
+  analyze_metric_outliers("Heart Rate") %>%  # For HR
+  rename(
+    avg_hr = avg_val,
+    lower_threshold_hr = lower_threshold,
+    upper_threshold_hr = upper_threshold,
+    is_outlier_hr = is_outlier
+  )
+
+create_metric_plot <- function(subject_data, metric, y_label) {
+  metric_sym <- sym(metric)
+  prefix <- ifelse(metric == "Clean R-R", "rr", "hr")
+  
+  outlier_counts <- subject_data %>%
+    group_by(Condition_Order) %>%
+    summarise(outlier_count = sum(!!sym(paste0("is_outlier_", prefix)), na.rm = TRUE), .groups = "drop")
+  
+  ggplot(subject_data, aes(x = Time, y = !!metric_sym)) +
+    geom_line(color = "gray60", linewidth = 0.3) +
+    geom_point(
+      data = ~ filter(.x, !!sym(paste0("is_outlier_", prefix))), 
+      color = "red", size = 0.8, alpha = 0.7
+    ) +
+    geom_hline(
+      aes(yintercept = !!sym(paste0("avg_", prefix))), 
+      color = "blue", linetype = "dashed", linewidth = 0.3
+    ) +
+    geom_hline(
+      aes(yintercept = !!sym(paste0("upper_threshold_", prefix))), 
+      color = "darkgreen", linetype = "dotted", linewidth = 0.3
+    ) +
+    geom_hline(
+      aes(yintercept = !!sym(paste0("lower_threshold_", prefix))), 
+      color = "darkgreen", linetype = "dotted", linewidth = 0.3
+    ) +
+    geom_text(
+      data = outlier_counts,
+      aes(x = -Inf, y = Inf, label = paste("Outliers:", outlier_count)),
+      hjust = -0.1, 
+      vjust = 1.5, 
+      size = 2.5, 
+      color = "red"
+    ) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id), "-", y_label),
+      x = "Time (s)",
+      y = y_label,
+      caption = "Blue dashed: Average | Green dotted: 40% Thresholds"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8),
+      axis.text = element_text(size = 6)
+    )
+}
+
+# Create and save plots for both metrics
+outlier_subject_plots_hrv <- filtered_exp_annotated %>%
+  group_split(Id) %>%
+  map(~ create_metric_plot(.x, "Clean R-R", "R-R Interval (ms)"))
+
+outlier_subject_plots_hr <- filtered_exp_annotated %>%
+  group_split(Id) %>%
+  map(~ create_metric_plot(.x, "Heart Rate", "Heart Rate (bpm)"))
+
+# Print HR plots 
+walk(outlier_subject_plots_hr, print)
+
+# Print HRV plots 
+walk(outlier_subject_plots_hrv, print)
+
+# Combined summary
+outlier_summary <- filtered_exp_annotated %>%
+  group_by(Id, Condition_Order) %>%
+  summarise(
+    total_points = n(),
+    hr_outliers = sum(is_outlier_hr, na.rm = TRUE),
+    hrv_outliers = sum(is_outlier_rr, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View combined outliers results
+print(outlier_summary)
+
+
+```
+
+## Re-plotting HR and HRV without Outliers (Commented out)
+
+```{r}
+# Process data with outlier replacement for both metrics
+filtered_exp_cleaned <- filtered_exp_synced %>%
+  group_by(Id, Condition_Order) %>%
+  mutate(
+    # HRV (R-R) calculations
+    avg_rr = mean(`Clean R-R`, na.rm = TRUE),
+    lower_threshold_rr = 0.6 * avg_rr,
+    upper_threshold_rr = 1.4 * avg_rr,
+    is_outlier_rr = (`Clean R-R` < lower_threshold_rr) | (`Clean R-R` > upper_threshold_rr),
+    Clean_RR_Filtered = ifelse(is_outlier_rr, NA, `Clean R-R`),
+    
+    # HR calculations
+    avg_hr = mean(`Heart Rate`, na.rm = TRUE),
+    lower_threshold_hr = 0.6 * avg_hr,
+    upper_threshold_hr = 1.4 * avg_hr,
+    is_outlier_hr = (`Heart Rate` < lower_threshold_hr) | (`Heart Rate` > upper_threshold_hr),
+    Heart_Rate_Filtered = ifelse(is_outlier_hr, NA, `Heart Rate`)
+  ) %>%
+  ungroup()
+
+
+create_subject_plot <- function(subject_data, metric = c("HRV", "HR")) {
+  metric <- match.arg(metric)
+  
+  if (metric == "HRV") {
+    y_var <- sym("Clean_RR_Filtered")
+    avg_var <- "avg_rr"
+    lower_threshold_var <- "lower_threshold_rr"
+    upper_threshold_var <- "upper_threshold_rr"
+    y_label <- "Filtered R-R Interval (ms)"
+    outlier_var <- "is_outlier_rr"
+  } else {
+    y_var <- sym("Heart_Rate_Filtered")
+    avg_var <- "avg_hr"
+    lower_threshold_var <- "lower_threshold_hr"
+    upper_threshold_var <- "upper_threshold_hr"
+    y_label <- "Filtered Heart Rate (bpm)"
+    outlier_var <- "is_outlier_hr"
+  }
+  
+  # Prepare threshold and outlier data
+  threshold_data <- subject_data %>%
+    group_by(Condition_Order) %>%
+    summarise(
+      avg_val = first(!!sym(avg_var)),
+      upper_threshold = first(!!sym(upper_threshold_var)),
+      lower_threshold = first(!!sym(lower_threshold_var)),
+      .groups = "drop"
+    )
+  
+  outlier_counts <- subject_data %>%
+    group_by(Condition_Order) %>%
+    summarise(outlier_count = sum(!!sym(outlier_var), na.rm = TRUE), .groups = "drop")
+  
+  # Create the plot
+  ggplot(subject_data, aes(x = Time, y = !!y_var)) +
+    geom_line(color = "#1f77b4", linewidth = 0.4) +
+    geom_hline(
+      data = threshold_data,
+      aes(yintercept = avg_val),
+      color = "blue", 
+      linetype = "dashed", 
+      linewidth = 0.3
+    ) +
+    geom_hline(
+      data = threshold_data,
+      aes(yintercept = upper_threshold),
+      color = "darkgreen", 
+      linetype = "dotted", 
+      linewidth = 0.3
+    ) +
+    geom_hline(
+      data = threshold_data,
+      aes(yintercept = lower_threshold),
+      color = "darkgreen", 
+      linetype = "dotted", 
+      linewidth = 0.3
+    ) +
+    geom_text(
+      data = outlier_counts,
+      aes(x = Inf, y = Inf, label = paste("Outliers Removed:", outlier_count)),
+      hjust = 1.1, 
+      vjust = 1.5, 
+      size = 3, 
+      color = "red"
+    ) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id), "-", metric),
+      x = "Time (s)",
+      y = y_label,
+      caption = "Blue dashed: Average | Green dotted: 50% Thresholds"
+    ) +
+    theme_minimal()
+}
+
+
+# Generate and view plots for both metrics
+hr_plots_no_outlier <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot(.x, "HR"))
+
+hrv_plots_no_outlier <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot(.x, "HRV"))
+
+# Print HR plots (Uncomment to print)
+#walk(hr_plots_no_outlier, print)
+
+# Print HRV plots (Uncomment to print)
+#walk(hrv_plots_no_outlier, print)
+
+# View outlier summary table (Uncomment to print)
+#print(outlier_summary)
+
+```
+
+# Re-doing t-tests without Outliers
+
+```{r}
+# Calculate metrics using FILTERED DATA
+results_filtered <- filtered_exp_cleaned %>%
+  filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  group_by(Id, section_id) %>%
+  arrange(Time) %>%
+  summarise(
+    # Use filtered heart rate (outliers replaced with NA)
+    mean_heart_rate = mean(Heart_Rate_Filtered, na.rm = TRUE),
+    
+    # Add HR_entropy
+    
+    # HRV calculation using filtered RR intervals
+    heart_rate_variability = {
+      clean_rr <- na.omit(Clean_RR_Filtered)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD calculation
+      } else {
+        NA_real_
+      }
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
+  )
+
+# View results sorted by Id and section
+results_filtered %>% arrange(Id, section_id)
+
+# Join results table with the condensed data to include condition names
+linked_results_filtered <- results_filtered %>%
+  left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
+
+# Add HR Entropy
+linked_results_filtered <- linked_results_filtered %>%
+  left_join(linked_results %>% select(Id, Condition_Order, HR_entropy), 
+             by = c("Id", "Condition_Order"))
+
+paired_ttest_results_filtered <- run_all_paired_ttests(linked_results_filtered)
+
+# Generate individual plots for heart rate variability (no outliers)
+ttest_hrv_plots_no_outliers <- plot_individual_paired_comparisons(
+  data = linked_results_filtered,
+  ttest_results = paired_ttest_results_filtered,
+  metric = "heart_rate_variability"
+)
+
+# Generate individual plots for heart rate variability (no outliers)
+ttest_meanhr_plots_no_outlier <- plot_individual_paired_comparisons(
+  data = linked_results_filtered,
+  ttest_results = paired_ttest_results_filtered,
+  metric = "mean_heart_rate"
+)
+
+# Generate individual plots for heart rate variability (no outliers)
+ttest_entropy_plots <- plot_individual_paired_comparisons(
+  data = linked_results_filtered,
+  ttest_results = paired_ttest_results_filtered,
+  metric = "HR_entropy"
+)
+
+# Print all plots
+walk(ttest_meanhr_plots_no_outlier, print)
+walk(ttest_hrv_plots_no_outliers, print)
+walk(ttest_entropy_plots, print)
+
+# Uncomment to Create PDF report
+# pdf("HR_HRV_Report.pdf", width = 11, height = 8.5)  # Letter size landscape
+# HR plots
+# walk(hr_subject_plots, print)
+# walk(meanhr_plots_ttest, print)
+# walk(outlier_subject_plots_hr, print)
+# walk(hr_plots_no_outlier, print)
+# walk(ttest_meanhr_plots_no_outlier, print)
+# HRV plots
+# walk(hrv_subject_plots, print)
+# walk(hrv_plots_ttest, print)
+# walk(outlier_subject_plots_hrv, print)
+# walk(hrv_plots_no_outlier, print)
+# walk(ttest_hrv_plots_no_outliers, print)
+# Close PDF device
+# dev.off()
+
+paired_ttest_results_filtered
+```
+
+## Plotting Standardized HR and HRV (Outliers Removed)
+
+```{r}
+filtered_exp_cleaned <- filtered_exp_cleaned %>%
+  group_by(Id) %>%
+  mutate(
+    # Calculate mean and standard deviation for Clean R-R
+    mean_rr = mean(`Clean_RR_Filtered`, na.rm = TRUE),
+    sd_rr = sd(`Clean_RR_Filtered`, na.rm = TRUE),
+    
+    # Standardized Clean R-R
+    Clean_RR_Standardized = (`Clean_RR_Filtered` - mean_rr) / sd_rr,
+    
+    # Calculate mean and standard deviation for Heart Rate
+    mean_hr = mean(`Heart_Rate_Filtered`, na.rm = TRUE),
+    sd_hr = sd(`Heart_Rate_Filtered`, na.rm = TRUE),
+    
+    # Standardized Heart Rate
+    Heart_Rate_Standardized = (`Heart_Rate_Filtered` - mean_hr) / sd_hr
+  ) %>%
+  ungroup()
+
+create_subject_plot_standardized <- function(subject_data, metric = c("HRV", "HR")) {
+  metric <- match.arg(metric)
+  if (metric == "HRV") {
+    y_var <- sym("Clean_RR_Standardized")
+    y_label <- "Standardized R-R Interval"
+  } else {
+    y_var <- sym("Heart_Rate_Standardized")
+    y_label <- "Standardized Heart Rate"
+  }
+
+  # Create the plot
+  ggplot(subject_data, aes(x = Time, y = !!y_var)) +
+    geom_line(color = "#1f77b4", linewidth = 0.4) +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    labs(
+      title = paste("Subject", unique(subject_data$Id), "- Standardized ", metric),
+      x = "Time (s)",
+      y = y_label,
+    ) +
+    theme_minimal()
+}
+
+# Generate and view plots for both metrics
+hr_plots_standardized <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot_standardized(.x, "HR"))
+
+hrv_plots_standardized <- filtered_exp_cleaned %>%
+  group_split(Id) %>%
+  map(~ create_subject_plot_standardized(.x, "HRV"))
+
+# Print HR plots
+walk(hr_plots_standardized, print)
+
+# Print HRV plots
+walk(hrv_plots_standardized, print)
+
+```
+
+## Plotting Repeated Measures Correlation - ASC Score vs. HRV and HR Entropy
+
+```{r warning=FALSE, message=FALSE}
+# Add Mean HR, HRV, HR Entropy to ASC Scores 
+processed_questions_merged <- merge(processed_questions_asc, linked_results_filtered,
+                   by.x = c("Id", "Condition_Order"), 
+                   all.x = TRUE)
+
+# Remove duplicate rows
+pqm <- processed_questions_merged %>% distinct()
+
+# Combine Mono and Stereo data
+# Group by Id and VideoName to calculate mean ASC_Score and heart_rate_variability
+pqm_combined <- pqm %>%
+  group_by(Id, VideoName) %>%
+  summarise(
+    ASC_Score = mean(ASC_Score, na.rm = TRUE),
+    heart_rate_variability = mean(heart_rate_variability, na.rm = TRUE),
+    HR_entropy = mean(HR_entropy)
+  ) %>%
+  ungroup()
+
+# ASC vs HRV (Mono and Stereo ave)
+ggplot(pqm_combined, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# ASC vs HRV 
+ggplot(pqm, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Compute repeated measures correlation using combined mono/stereo scores
+rmcorr_result_combined <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm_combined)
+
+# View the results
+print(rmcorr_result_combined)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
+
+# ASC vs HR Entropy 
+ggplot(pqm, aes(x = HR_entropy, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Entropy",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = HR_entropy, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
+
+```
+## Do Answers to Questions 1 - 3 correlate with ASC Score?
+
+```{r warning=FALSE, message=FALSE}
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_Q1 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q1Answer, dataset = pqm)
+rmcorr_result_Q2 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q2Answer, dataset = pqm)
+rmcorr_result_Q3 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q3Answer, dataset = pqm)
+
+
+# Q1 vs ASC
+ggplot(pqm, aes(x = Q1Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3e\nr = %.3f", rmcorr_result_Q1$p, rmcorr_result_Q1$r),
+           family = "mono") 
+
+# Q2 vs ASC
+ggplot(pqm, aes(x = Q2Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q2$p, rmcorr_result_Q2$r),
+           family = "mono") 
+
+
+# Q3 vs ASC
+ggplot(pqm, aes(x = Q3Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q3$p, rmcorr_result_Q3$r),
+           family = "mono") 
+
+
+print(rmcorr_result_Q1)
+
+print(rmcorr_result_Q2)
+
+print(rmcorr_result_Q3)
+```
+## Linear Regression Model for Questions 1/2/3 vs. ASC Score
+
+```{r warning=FALSE, message=FALSE}
+pqm$Condition_Order <- as.factor(pqm$Condition_Order)
+
+analyze_and_plot <- function(response_var) {
+# Fit the model
+formula <- as.formula(paste("ASC_Score ~ ", response_var, " + Condition_Order + (1 | Id)"))
+model <- lmer(formula, data = pqm)
+print(paste("ASC ~", response_var, "ANOVA"))
+print(summary(model))
+print(anova(model))
+print("-------------------------------")
+  
+# Plot the relationship
+p1 <- ggplot(pqm, aes(x = .data[[response_var]], y = ASC_Score, color = Condition_Order)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = paste("ASC ~", response_var, "by Condition Type"), x = response_var, y = "ASC Score") +
+  theme_minimal()
+  
+# Create a data frame with fitted values and residuals
+resid_data <- data.frame(
+  Fitted = fitted(model),
+  Residuals = resid(model),
+  Condition = pqm$Condition_Order
+)
+
+# Residuals vs. Fitted
+p2 <- ggplot(resid_data, aes(x = Fitted, y = Residuals, color = Condition)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Residuals vs. Fitted ASC Score ~ ", response_var), x = paste("ASC Score Fitted Values"), y = paste("ASC Score Residuals")) +
+  theme_minimal()
+  
+# QQ-plot
+p3 <- ggplot(resid_data, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = paste("QQ-Plot of Residuals for ASC Score ~ ", response_var)) +
+  theme_minimal()
+
+print(p1)
+print(p2)
+print(p3)
+}
+
+analyze_and_plot("Q1Answer")
+analyze_and_plot("Q2Answer")
+analyze_and_plot("Q3Answer")
+```
+
+## Linear Regression Model Between Q1-3 and ASC Score (Condition-Specific)
+
+```{r warning=FALSE, message=FALSE}
+
+run_lm_by_condition <- function(data, response_var) {
+  response_var <- enquo(response_var)
+
+  model_summaries <- data %>%
+    group_by(Condition_Order) %>%
+    nest() %>%
+    mutate(
+      model = map(data, ~ lm(as.formula(paste("ASC_Score ~", quo_name(response_var))), data = .)),
+      tidy_model = map(model, broom::tidy)
+    ) %>%
+    unnest(tidy_model)
+
+  r_values <- data %>%
+    group_by(Condition_Order) %>%
+    summarise(r = cor(ASC_Score, !!response_var, use = "complete.obs")) %>%
+    mutate(r_label = paste0("r = ", round(r, 2)))
+
+  pvals <- model_summaries %>% 
+    filter(term == quo_name(response_var)) %>% 
+    select(Condition_Order, p.value) %>% 
+    mutate(p_label = paste0("p = ", signif(p.value, 2)))
+
+  ggplot(data, aes_string(x = quo_name(response_var), y = "ASC_Score")) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    facet_wrap(~ Condition_Order) +
+    geom_text(data = pvals, aes(x = -Inf, y = Inf, label = p_label), hjust = -1.1, vjust = 2.4, size = 4, inherit.aes = FALSE) +
+    geom_text(data = r_values, aes(x = -Inf, y = Inf, label = r_label), hjust = -1.4, vjust = 4.1, size = 4, inherit.aes = FALSE) +
+    labs(title = paste("Regression of", quo_name(response_var), "on ASC_Score by Condition"),
+         x = quo_name(response_var),
+         y = "ASC_Score") +
+    theme_minimal()
+}
+
+# Execution:
+run_lm_by_condition(pqm, Q1Answer)
+run_lm_by_condition(pqm, Q2Answer)
+run_lm_by_condition(pqm, Q3Answer)
+
+```
+
+
+## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV (or Mean HR) from Baseline?
+
+```{r warning=FALSE, message=FALSE}
+# Process baseline data (remove outliers, calculate Mean HR and HRV)
+data_base_processed_no_outliers <- data_base_processed %>%
+  group_by(Id) %>%
+  mutate(
+    # HRV (R-R) calculations
+    avg_rr = mean(`Clean R-R`, na.rm = TRUE),
+    lower_threshold_rr = 0.6 * avg_rr,
+    upper_threshold_rr = 1.4 * avg_rr,
+    is_outlier_rr = (`Clean R-R` < lower_threshold_rr) | (`Clean R-R` > upper_threshold_rr),
+    Clean_RR_Filtered = ifelse(is_outlier_rr, NA, `Clean R-R`),
+    
+    # HR calculations
+    avg_hr = mean(`Heart Rate`, na.rm = TRUE),
+    lower_threshold_hr = 0.6 * avg_hr,
+    upper_threshold_hr = 1.4 * avg_hr,
+    is_outlier_hr = (`Heart Rate` < lower_threshold_hr) | (`Heart Rate` > upper_threshold_hr),
+    Heart_Rate_Filtered = ifelse(is_outlier_hr, NA, `Heart Rate`)
+  ) %>%
+  ungroup()
+
+baseline_results <- data_base_processed_no_outliers %>%
+  filter(Id %in% 1:14) %>%
+  group_by(Id) %>%
+  arrange(Time) %>%
+  summarise(
+    mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    
+    # Improved HRV calculation
+    heart_rate_variability = {
+      clean_rr <- na.omit(`Clean R-R`)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD from consecutive non-NA values
+      } else {
+        NA_real_
+      }
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
+  )
+
+# Add baseline differences for mean heart rate and heart rate variability
+baseline_differences <- pqm %>%
+  left_join(
+    baseline_results %>% 
+      select(Id, baseline_mean_hr = mean_heart_rate, baseline_hrv = heart_rate_variability), 
+    by = "Id"
+  ) %>%
+  mutate(
+    baseline_difference_mean_hr = mean_heart_rate - baseline_mean_hr,
+    baseline_difference_hrv = heart_rate_variability - baseline_hrv
+  ) %>%
+  select(-baseline_mean_hr, -baseline_hrv)  # Remove intermediate columns
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineHRV_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q1$p, rmcorr_result_BaselineHRV_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q2$p, rmcorr_result_BaselineHRV_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q3$p, rmcorr_result_BaselineHRV_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_ASC$p, rmcorr_result_BaselineHRV_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineHRV_Q1)
+print(rmcorr_result_BaselineHRV_Q2)
+print(rmcorr_result_BaselineHRV_Q3)
+print(rmcorr_result_BaselineHRV_ASC)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineMeanHR_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q1$p, rmcorr_result_BaselineMeanHR_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q2$p, rmcorr_result_BaselineMeanHR_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q3$p, rmcorr_result_BaselineMeanHR_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_ASC$p, rmcorr_result_BaselineMeanHR_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineMeanHR_Q1)
+print(rmcorr_result_BaselineMeanHR_Q2)
+print(rmcorr_result_BaselineMeanHR_Q3)
+print(rmcorr_result_BaselineMeanHR_ASC)
+
+```
+
+## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
+
+```{r warning=FALSE, message=FALSE}
+# Define file paths
+file_paths <- list.files(path = "Study_01", pattern = "_DeviceData.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+device_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+condensed_device_combined <- device_combined %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName)
+  ) %>%
+  group_by(Id) %>%
+  mutate(Condition_Order = paste(VideoMode, Condition, sep = "_")) %>%
+  unnest_longer(Condition_Order)
+
+mean_pupil_size_df <- condensed_device_combined %>%
+  filter(Condition_Order != "NA_NA") %>%
+  group_by(Id, Condition_Order) %>%
+  summarise(
+    MeanAveragePupilSize = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Define file paths
+file_paths <- list.files(path = "Study_01", pattern = "_Baseline.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+baseline_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+mean_pupil_size_df_baseline <- baseline_combined %>%
+  group_by(Id) %>%
+  summarise(
+    MeanAveragePupilSizeBaseline = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+final_pupil_size_df <- mean_pupil_size_df %>%
+  left_join(mean_pupil_size_df_baseline %>% select(Id, MeanAveragePupilSizeBaseline), by = "Id") %>%
+  mutate(MeanPupilSize_Baseline_Diff = MeanAveragePupilSize - MeanAveragePupilSizeBaseline) %>%
+  select(Id, Condition_Order, MeanPupilSize_Baseline_Diff)
+
+baseline_differences <- baseline_differences %>%
+  left_join(final_pupil_size_df %>% select(Id, Condition_Order, MeanPupilSize_Baseline_Diff), by = c("Id", "Condition_Order"))
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineMeanPupil_Q1 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q2 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q3 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_ASC <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = ASC_Score, dataset = baseline_differences)
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q1$p, rmcorr_result_BaselineMeanPupil_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q2$p, rmcorr_result_BaselineMeanPupil_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q3$p, rmcorr_result_BaselineMeanPupil_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_ASC$p, rmcorr_result_BaselineMeanPupil_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineMeanPupil_Q1)
+print(rmcorr_result_BaselineMeanPupil_Q2)
+print(rmcorr_result_BaselineMeanPupil_Q3)
+print(rmcorr_result_BaselineMeanPupil_ASC)
+
+```
