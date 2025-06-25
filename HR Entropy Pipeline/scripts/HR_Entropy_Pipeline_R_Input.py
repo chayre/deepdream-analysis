@@ -4,7 +4,8 @@ import pandas as pd
 import tempfile
 
 # Define the correct script directory
-script_dir = r"C:\Users\CAyre\Documents\Coding\deepdream-analysis\HR Entropy Pipeline\scripts"
+script_dir = r"C:\Users\CAyre\Documents\Coding\deepdream-analysis\deepdream-analysis\HR Entropy Pipeline\scripts"
+    
 
 def process_dataframe(df):
     """Process the given dataframe through the HR entropy pipeline."""
