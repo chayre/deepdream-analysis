@@ -6,6 +6,8 @@ author:    |
 date: "April 2025"
 output: html_document
 chunk_output_type: console
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -33,6 +35,7 @@ library(lmerTest)
 library(broom)
 library(purrr)
 library(reticulate)
+library(stringr)
 
 # Set working directory
 mds_dir <- here::here()
@@ -98,57 +101,40 @@ clean_consecutive_rr <- function(data) {
     ) %>%
     ungroup()
 }
+
+
 ```
 
 ## Load and Process All Subject Data
 
 ```{r warning=FALSE, message=FALSE}
-# Import ECG data
-import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
-  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
+# Import ECG data 
+import_subjects_exp <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
   file_list <- list.files(
-    path = here(data_dir),
-    pattern = "\\d+_experiment\\.csv",
+    path = data_dir,
+    pattern = "ID\\d+\\.csv",
     full.names = TRUE
   )
-
-  # Read and combine all files
+  
+  # Filter to only ID01.csv, ID02.csv, ID03.csv
+  ## NOTE ANALYSIS DONE WITHOUT ID28, NO QUESTION DATA FOR THIS SUBJECT
+  file_list <- file_list[basename(file_list) %in% c('ID01.csv', 'ID02.csv', 'ID03.csv', 'ID04.csv', 'ID05.csv', 'ID06.csv', 'ID07.csv', 'ID08.csv', 'ID09.csv', 'ID10.csv', 'ID11.csv', 'ID12.csv', 'ID13.csv', 'ID14.csv', 'ID15.csv', 'ID16.csv', 'ID17.csv', 'ID18.csv', 'ID19.csv', 'ID20.csv', 'ID21.csv', 'ID22.csv', 'ID23.csv', 'ID24.csv', 'ID25.csv', 'ID26.csv', 'ID27.csv')]
+  
+  if (length(file_list) == 0) {
+    stop("No matching files found.")
+  }
+  
   data <- map_df(file_list, ~ {
     read_delim(.x, 
-              delim = ";",
-              col_types = cols(.default = col_character()),
-              show_col_types = FALSE) %>%
-      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
-      type_convert()  # Automatically convert columns to appropriate types
+               delim = ";",
+               col_types = cols(.default = col_character()),
+               show_col_types = FALSE) %>%
+      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%
+      type_convert()
   })
-
-  # Arrange by subject ID
+  
   data <- data %>% arrange(Id)
-
-  return(data)
-}
-
-import_subjects_base <- function(data_dir = "C:\\Users\\CAyre\\Documents\\Coding\\deepdream-analysis\\Study_01\\ECG\\ACQ") {
-  # Get list of all subject files (e.g., ID01_baseline.csv, ID02_baseline.csv)
-  file_list <- list.files(
-    path = here(data_dir),
-    pattern = "ID\\d+_baseline\\.csv",
-    full.names = TRUE
-  )
-
-  # Read and combine all files
-  data <- map_df(file_list, ~ {
-    read_delim(.x, 
-              delim = ";",
-              col_types = cols(.default = col_character()),
-              show_col_types = FALSE) %>%
-      mutate(Id = as.integer(str_extract(basename(.x), "\\d+"))) %>%  # Extract ID
-      type_convert()  # Automatically convert columns to appropriate types
-  })
-
-  # Arrange by subject ID
-  data <- data %>% arrange(Id)
-
+  
   return(data)
 }
 
@@ -183,12 +169,12 @@ process_all_subjects <- function(raw_data) {
 
 # Execution
 data_exp <- import_subjects_exp()
-data_base <- import_subjects_base()
+#data_base <- import_subjects_base()
 
 data_exp_processed <- process_all_subjects(data_exp)
-data_base_processed <- process_all_subjects(data_base)
+#data_base_processed <- process_all_subjects(data_base)
 data_exp_processed <- clean_consecutive_rr(data_exp_processed)
-data_base_processed <- clean_consecutive_rr(data_base_processed)
+#data_base_processed <- clean_consecutive_rr(data_base_processed)
 ```
 
 ## Pulling out Condition Orders for each Subject
@@ -198,26 +184,60 @@ data_base_processed <- clean_consecutive_rr(data_base_processed)
 file_paths <- list.files(path = "Study_01", pattern = "_QuestionsData.csv", full.names = TRUE)
 
 # Import CSV files and combine them into a single data frame
-questions_combined <- bind_rows(lapply(file_paths, read_csv2))
+questions_combined <- bind_rows(lapply(file_paths, function(file) {
+  read_csv2(file, 
+            col_types = cols(Timestamp = col_datetime(), 
+                             Id = col_character(),
+                             Sex = col_character(),
+                             VideoName = col_character(),
+                             VideoMode = col_character(),
+                             AnswerDuration = col_double(),
+                             .default = col_double()), 
+            show_col_types = FALSE)
+}))
 
 condensed_questions_combined <- questions_combined %>%
   select(Id, VideoName, VideoMode, QuestionIndex, QuestionAnswer) %>%
-  mutate(
-    Condition = as.factor(VideoMode),
-    VideoMode = case_when(
-      grepl("Main_Stereo", VideoName) ~ "Stereo",
-      grepl("Main_Mono", VideoName) ~ "Mono",
-      TRUE ~ as.character(VideoMode)
-    ),
-    VideoName = as.factor(VideoName),
-    QuestionIndex = as.factor(QuestionIndex)
-  )
+   mutate(
+      Condition = VideoName,
+      Mode = case_when(
+        grepl("HighLayer_Weak", VideoName) ~ "Hallucination",
+        grepl("Normal", VideoName) ~ "Normal",
+        grepl("LowLayer_Strong", VideoName) ~ "Hallucination",
+        grepl("MidLayer_Strong", VideoName) ~ "Hallucination",
+        grepl("MidLayer_Weak", VideoName) ~ "Hallucination",
+        grepl("HighLayer_Strong", VideoName) ~ "Hallucination",
+        grepl("LowLayer_Weak", VideoName) ~ "Hallucination",
+        TRUE ~ as.character(VideoMode)
+      ),
+      Type = case_when(
+        grepl("HighLayer_Weak", VideoName) ~ "HighLayer",
+        grepl("Normal", VideoName) ~ "Normal",
+        grepl("LowLayer_Strong", VideoName) ~ "LowLayer",
+        grepl("MidLayer_Strong", VideoName) ~ "MidLayer",
+        grepl("MidLayer_Weak", VideoName) ~ "MidLayer",
+        grepl("HighLayer_Strong", VideoName) ~ "HighLayer",
+        grepl("LowLayer_Weak", VideoName) ~ "LowLayer",
+        TRUE ~ as.character(VideoMode)
+      ),
+      Strength = case_when(
+        grepl("HighLayer_Weak", VideoName) ~ "Weak",
+        grepl("Normal", VideoName) ~ "Normal",
+        grepl("LowLayer_Strong", VideoName) ~ "Strong",
+        grepl("MidLayer_Strong", VideoName) ~ "Strong",
+        grepl("MidLayer_Weak", VideoName) ~ "Weak",
+        grepl("HighLayer_Strong", VideoName) ~ "Strong",
+        grepl("LowLayer_Weak", VideoName) ~ "Weak",
+        TRUE ~ as.character(VideoMode)
+      )
+    ) 
+
 
 # Table which links condition to section number and ID
 processed_questions_combined <- condensed_questions_combined %>%
   group_by(Id) %>%
   arrange(Id, row_number()) %>%
-  mutate(Order = paste(VideoMode, Condition, sep = "_")) %>%
+  mutate(Order = Condition) %>%
   summarise(Condition_Order = list(unique(Order)), .groups = "drop") %>%
   unnest_longer(Condition_Order) %>%
   group_by(Id) %>%
@@ -233,14 +253,10 @@ asc_scores <- condensed_questions_combined %>%
     Q1Answer = QuestionAnswer[QuestionIndex == 1][1],
     Q2Answer = QuestionAnswer[QuestionIndex == 2][1],
     Q3Answer = QuestionAnswer[QuestionIndex == 3][1],
-    VideoName = case_when(
-      grepl("Hallucinations", VideoName) ~ "Hallucinations",
-      grepl("Normal", VideoName) ~ "Normal",
-      TRUE ~ as.character(VideoName)
-    ),
+    Condition = VideoName,
     .groups = "drop"
   ) %>%
-  mutate(Condition_Order = paste(VideoMode, VideoName, sep = "_"))
+  mutate(Condition_Order = Condition)
 
 # Combining ASC Scores with Condition_Order
 processed_questions_asc <- merge(processed_questions_combined, asc_scores,
@@ -268,8 +284,40 @@ plot_event_by_frame <- function(subject_id, data = data_exp_processed) {
     theme_minimal()
 }
 
+# Manual Events Filtering
+data_exp_processed <- data_exp_processed %>%
+  mutate(EVENT = if_else(
+    Id %in% c(2, 4, 6, 7, 9, 12, 13, 15, 16, 20, 22, 25, 27) & EVENT == 4 & Time < 250,
+    0L,  # Integer 0
+    EVENT
+  )) %>%
+  filter(!(Id == 24 & Time < 1000))
+
+
+# Adding in missing 4 EVENT for ID 8
+data_exp_processed <- data_exp_processed %>%
+  group_by(Id) %>%
+  mutate(
+    # Identify the time of the 9th EVENT == 8 for Id == 8
+    target_time = if_else(
+      Id == 8 & EVENT == 8 & row_number() == which(EVENT == 8)[9],
+      Time - 240,
+      NA_real_
+    ),
+    target_time = max(target_time, na.rm = TRUE),  # Propagate target time within Id == 8
+    # Set EVENT to 4 for the row closest to target_time
+    EVENT = if_else(
+      Id == 8 & abs(Time - target_time) == min(abs(Time - target_time), na.rm = TRUE),
+      4L,
+      EVENT
+    )
+  ) %>%
+  select(-target_time) %>%  # Remove temporary column
+  ungroup()
+  
+
 # Execution
-map(1, plot_event_by_frame)  # Only plotting the first subject
+map(8, plot_event_by_frame)  # Only plotting the first s ubject
 
 ```
 
@@ -278,16 +326,6 @@ map(1, plot_event_by_frame)  # Only plotting the first subject
 ### There are four sections of data per subject that occur between an event 4 and event 8 marker. Ensure there are no extraneous 4 events before proceeding with analysis
 
 ```{r}
-# In the experimental data, Subject 2, there is a random event 4 at the start of the data which does not correlate to an event 8 (the next event 8 happens ~1000 seconds later). I'm filtering this out.
-data_exp_processed <- data_exp_processed %>%
-  mutate(
-    EVENT = if_else(
-      Id == 2 & Time == 1.531,  # Match time with tolerance for precision
-      0,  # Replace EVENT with 0
-      EVENT  # Keep original value otherwise
-    )
-  )
-
 # Select only points between events 4 and 8
 filter_between_events <- function(data, start_event = 4, end_event = 8) {
   data %>%
@@ -306,8 +344,29 @@ filter_between_events <- function(data, start_event = 4, end_event = 8) {
 }
 
 # Filter out points between events 4 and 8
-filtered_exp <- filter_between_events(data_exp_processed)
+filtered_data <- filter_between_events(data_exp_processed)
 
+split_experiments <- function(df) {
+  # Group by Id and assign periods within each Id
+  df <- df %>%
+    group_by(Id) %>%
+    mutate(period = cumsum(EVENT == 4)) %>%
+    ungroup() %>%
+    filter(period > 0)
+  
+ # Assign baseline (periods 1-4), remove period column
+  assign("filtered_baseline", df %>% 
+           filter(period <= 4) %>% 
+           select(-period), envir = .GlobalEnv)
+  
+  # Assign experimental (periods 5-11), subtract 4 from section_id, remove period column
+  assign("filtered_exp", df %>% 
+           filter(period >= 5) %>% 
+           mutate(section_id = section_id - 4) %>% 
+           select(-period), envir = .GlobalEnv)
+}
+
+split_experiments(filtered_data)
 
 # Use the correct Python version
 use_python("C:/Users/CAyre/AppData/Local/Programs/Python/Python313", required = TRUE)
@@ -358,7 +417,7 @@ for (i in 1:nrow(unique_combinations)) {
 
 # Calculating Mean Heart Rate and Heart Rate Variability in each section (between Event = 4 and Event = 8) for each subject
 hr_results <- filtered_exp %>%
-  filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  filter(Id %in% 1:27, section_id %in% 1:7) %>%
   group_by(Id, section_id) %>%
   arrange(Time) %>%
   summarise(
@@ -383,6 +442,10 @@ hr_results <- filtered_exp %>%
 combined_results <- hr_results %>%
   left_join(python_results, by = c("Id", "section_id"))
 
+# Convert Id to integer in processed_questions_combined
+processed_questions_combined <- processed_questions_combined %>%
+  mutate(Id = as.integer(Id))
+
 # Join with condition names (processed_questions_combined)
 linked_results <- combined_results %>%
   left_join(processed_questions_combined, by = c("Id" = "Id", "section_id" = "Order_Number"))
@@ -391,7 +454,7 @@ linked_results <- combined_results %>%
 linked_results %>% arrange(Id, section_id)
 
 # Print the final results dataframe
-print(linked_results)
+linked_results
 
 ```
 
@@ -569,7 +632,7 @@ filtered_exp_synced <- filtered_exp %>%
 create_subject_plot_rr <- function(subject_data) {
   ggplot(subject_data, aes(x = Time, y = `Clean R-R`)) +
     geom_line(color = "#2c7bb6", linewidth = 0.4) +
-    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 4, scales = "free_x") +
     labs(
       title = paste("Subject", unique(subject_data$Id)),
       x = "Time (s)",
@@ -588,7 +651,7 @@ create_subject_plot_rr <- function(subject_data) {
 create_subject_plot_hr <- function(subject_data) {
   ggplot(subject_data, aes(x = Time, y = `Heart Rate`)) +
     geom_line(color = "#2c7bb6", linewidth = 0.4) +
-    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 4, scales = "free_x") +
     labs(
       title = paste("Subject", unique(subject_data$Id)),
       x = "Time (s)",
@@ -697,7 +760,7 @@ create_metric_plot <- function(subject_data, metric, y_label) {
       size = 2.5, 
       color = "red"
     ) +
-    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 4, scales = "free_x") +
     labs(
       title = paste("Subject", unique(subject_data$Id), "-", y_label),
       x = "Time (s)",
@@ -722,10 +785,10 @@ outlier_subject_plots_hr <- filtered_exp_annotated %>%
   map(~ create_metric_plot(.x, "Heart Rate", "Heart Rate (bpm)"))
 
 # Print HR plots 
-walk(outlier_subject_plots_hr, print)
+#walk(outlier_subject_plots_hr, print)
 
 # Print HRV plots 
-walk(outlier_subject_plots_hrv, print)
+#walk(outlier_subject_plots_hrv, print)
 
 # Combined summary
 outlier_summary <- filtered_exp_annotated %>%
@@ -832,7 +895,7 @@ create_subject_plot <- function(subject_data, metric = c("HRV", "HR")) {
       size = 3, 
       color = "red"
     ) +
-    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 4, scales = "free_x") +
     labs(
       title = paste("Subject", unique(subject_data$Id), "-", metric),
       x = "Time (s)",
@@ -868,7 +931,7 @@ hrv_plots_no_outlier <- filtered_exp_cleaned %>%
 ```{r}
 # Calculate metrics using FILTERED DATA
 results_filtered <- filtered_exp_cleaned %>%
-  filter(Id %in% 1:14, section_id %in% 1:4) %>%
+  filter(Id %in% 1:27, section_id %in% 1:7) %>%
   group_by(Id, section_id) %>%
   arrange(Time) %>%
   summarise(
@@ -987,7 +1050,7 @@ create_subject_plot_standardized <- function(subject_data, metric = c("HRV", "HR
   # Create the plot
   ggplot(subject_data, aes(x = Time, y = !!y_var)) +
     geom_line(color = "#1f77b4", linewidth = 0.4) +
-    facet_wrap(~ Condition_Order, nrow = 2, ncol = 2, scales = "free_x") +
+    facet_wrap(~ Condition_Order, nrow = 2, ncol = 4, scales = "free_x") +
     labs(
       title = paste("Subject", unique(subject_data$Id), "- Standardized ", metric),
       x = "Time (s)",
@@ -1087,7 +1150,7 @@ ggplot(pqm, aes(x = HR_entropy, y = ASC_Score, color = as.factor(Id), shape = Vi
   theme(legend.position = "bottom")
 
 
-# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+# Compute repeated measures correlation without combined mono/stereo scores (7 points per subject)
 rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = HR_entropy, dataset = pqm)
 
 # View the results
@@ -1261,7 +1324,7 @@ run_lm_by_condition(pqm, Q3Answer)
 
 ```{r warning=FALSE, message=FALSE}
 # Process baseline data (remove outliers, calculate Mean HR and HRV)
-data_base_processed_no_outliers <- data_base_processed %>%
+data_base_processed_no_outliers <- filtered_baseline %>%
   group_by(Id) %>%
   mutate(
     # HRV (R-R) calculations
@@ -1304,6 +1367,7 @@ baseline_results <- data_base_processed_no_outliers %>%
 
 # Add baseline differences for mean heart rate and heart rate variability
 baseline_differences <- pqm %>%
+  mutate(Id = as.integer(Id)) %>%
   left_join(
     baseline_results %>% 
       select(Id, baseline_mean_hr = mean_heart_rate, baseline_hrv = heart_rate_variability), 
@@ -1478,7 +1542,11 @@ print(rmcorr_result_BaselineMeanHR_ASC)
 file_paths <- list.files(path = "Study_01", pattern = "_DeviceData.csv", full.names = TRUE)
 
 # Import CSV files and combine them into a single data frame
-device_combined <- bind_rows(lapply(file_paths, read_csv2))
+device_combined <- bind_rows(lapply(file_paths, function(file) {
+  read_csv2(file, 
+            col_types = cols(Id = col_integer(), SegmentIndex = col_integer(), QuestionIndex = col_double(), LeftEyePupilSize = col_double(), RightEyePupilSize = col_double(), .default = col_guess()),
+            show_col_types = FALSE)
+}))
 
 condensed_device_combined <- device_combined %>%
   mutate(
@@ -1523,7 +1591,7 @@ final_pupil_size_df <- mean_pupil_size_df %>%
 baseline_differences <- baseline_differences %>%
   left_join(final_pupil_size_df %>% select(Id, Condition_Order, MeanPupilSize_Baseline_Diff), by = c("Id", "Condition_Order"))
 
-# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+# Compute repeated measures correlation without combined mono/stereo scores (7 points per subject)
 rmcorr_result_BaselineMeanPupil_Q1 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q1Answer, dataset = baseline_differences)
 rmcorr_result_BaselineMeanPupil_Q2 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q2Answer, dataset = baseline_differences)
 rmcorr_result_BaselineMeanPupil_Q3 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q3Answer, dataset = baseline_differences)
