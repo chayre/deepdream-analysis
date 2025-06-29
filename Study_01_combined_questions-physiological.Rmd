@@ -498,7 +498,7 @@ print(rmcorr_result_BaselineMeanHR_ASC)
 
 ```
 
-## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
+## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers [Not finished]
 
 ```{r warning=FALSE, message=FALSE}
 # Define file paths
