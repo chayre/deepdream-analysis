@@ -1,0 +1,633 @@
+---
+title: "Study 01 - Subjects Combined Questions-Physiological Analysis"
+author:    |
+    | Colin Ayres  
+    | c.ayres@student.uw.edu.pl
+date: "June 2025"
+output: html_document
+chunk_output_type: console
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Packages
+
+```{r warning=FALSE, message=FALSE}
+# Load packages
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(zoo)
+library(dplyr)
+library(patchwork)
+library(mgcv)
+library(ggpubr)
+library(rstatix)
+library(readr)
+library(gridExtra)
+library(rmcorr) 
+library(lme4)
+library(lmerTest)
+library(broom)
+library(purrr)
+library(reticulate)
+library(stringr)
+
+# Set working directory
+mds_dir <- here::here()
+
+```
+## Load Physiological + Questions Data (From combined_heart.Rmd)
+
+```{r warning=FALSE, message=FALSE}
+pqm <- read.csv("study_01_processed_questions_merged.csv")
+
+```
+
+## Plotting Repeated Measures Correlation - ASC Score vs. HRV and HR Entropy
+
+```{r warning=FALSE, message=FALSE}
+# Group by Id and VideoName to calculate mean ASC_Score and heart_rate_variability
+pqm_combined <- pqm %>%
+  group_by(Id, VideoName) %>%
+  summarise(
+    ASC_Score = mean(ASC_Score, na.rm = TRUE),
+    heart_rate_variability = mean(heart_rate_variability, na.rm = TRUE),
+    HR_entropy = mean(HR_entropy)
+  ) %>%
+  ungroup()
+
+# ASC vs HRV (Mono and Stereo ave)
+ggplot(pqm_combined, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# ASC vs HRV 
+ggplot(pqm, aes(x = heart_rate_variability, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Variability",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Compute repeated measures correlation using combined mono/stereo scores
+rmcorr_result_combined <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm_combined)
+
+# View the results
+print(rmcorr_result_combined)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = heart_rate_variability, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
+
+# ASC vs HR Entropy 
+ggplot(pqm, aes(x = HR_entropy, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Heart Rate Entropy",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# Compute repeated measures correlation without combined mono/stereo scores (7 points per subject)
+rmcorr_result <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = HR_entropy, dataset = pqm)
+
+# View the results
+print(rmcorr_result)
+
+```
+## Do Answers to Questions 1 - 3 correlate with ASC Score?
+
+```{r warning=FALSE, message=FALSE}
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_Q1 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q1Answer, dataset = pqm)
+rmcorr_result_Q2 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q2Answer, dataset = pqm)
+rmcorr_result_Q3 <- rmcorr(participant = Id, measure1 = ASC_Score, measure2 = Q3Answer, dataset = pqm)
+
+
+# Q1 vs ASC
+ggplot(pqm, aes(x = Q1Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3e\nr = %.3f", rmcorr_result_Q1$p, rmcorr_result_Q1$r),
+           family = "mono") 
+
+# Q2 vs ASC
+ggplot(pqm, aes(x = Q2Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q2$p, rmcorr_result_Q2$r),
+           family = "mono") 
+
+
+# Q3 vs ASC
+ggplot(pqm, aes(x = Q3Answer, y = ASC_Score, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "ASC Score",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.1, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_Q3$p, rmcorr_result_Q3$r),
+           family = "mono") 
+
+
+print(rmcorr_result_Q1)
+
+print(rmcorr_result_Q2)
+
+print(rmcorr_result_Q3)
+```
+## Linear Regression Model for Questions 1/2/3 vs. ASC Score
+
+```{r warning=FALSE, message=FALSE}
+pqm$Condition_Order <- as.factor(pqm$Condition_Order)
+
+analyze_and_plot <- function(response_var) {
+# Fit the model
+formula <- as.formula(paste("ASC_Score ~ ", response_var, " + Condition_Order + (1 | Id)"))
+model <- lmer(formula, data = pqm)
+print(paste("ASC ~", response_var, "ANOVA"))
+print(summary(model))
+print(anova(model))
+print("-------------------------------")
+  
+# Plot the relationship
+p1 <- ggplot(pqm, aes(x = .data[[response_var]], y = ASC_Score, color = Condition_Order)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = paste("ASC ~", response_var, "by Condition Type"), x = response_var, y = "ASC Score") +
+  theme_minimal()
+  
+# Create a data frame with fitted values and residuals
+resid_data <- data.frame(
+  Fitted = fitted(model),
+  Residuals = resid(model),
+  Condition = pqm$Condition_Order
+)
+
+# Residuals vs. Fitted
+p2 <- ggplot(resid_data, aes(x = Fitted, y = Residuals, color = Condition)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Residuals vs. Fitted ASC Score ~ ", response_var), x = paste("ASC Score Fitted Values"), y = paste("ASC Score Residuals")) +
+  theme_minimal()
+  
+# QQ-plot
+p3 <- ggplot(resid_data, aes(sample = Residuals)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = paste("QQ-Plot of Residuals for ASC Score ~ ", response_var)) +
+  theme_minimal()
+
+print(p1)
+print(p2)
+print(p3)
+}
+
+analyze_and_plot("Q1Answer")
+analyze_and_plot("Q2Answer")
+analyze_and_plot("Q3Answer")
+```
+
+## Linear Regression Model Between Q1-3 and ASC Score (Condition-Specific)
+
+```{r warning=FALSE, message=FALSE}
+
+run_lm_by_condition <- function(data, response_var) {
+  response_var <- enquo(response_var)
+
+  model_summaries <- data %>%
+    group_by(Condition_Order) %>%
+    nest() %>%
+    mutate(
+      model = map(data, ~ lm(as.formula(paste("ASC_Score ~", quo_name(response_var))), data = .)),
+      tidy_model = map(model, broom::tidy)
+    ) %>%
+    unnest(tidy_model)
+
+  r_values <- data %>%
+    group_by(Condition_Order) %>%
+    summarise(r = cor(ASC_Score, !!response_var, use = "complete.obs")) %>%
+    mutate(r_label = paste0("r = ", round(r, 2)))
+
+  pvals <- model_summaries %>% 
+    filter(term == quo_name(response_var)) %>% 
+    select(Condition_Order, p.value) %>% 
+    mutate(p_label = paste0("p = ", signif(p.value, 2)))
+
+  ggplot(data, aes_string(x = quo_name(response_var), y = "ASC_Score")) +
+    geom_point(alpha = 0.7) +
+    geom_smooth(method = "lm", se = FALSE, color = "blue") +
+    facet_wrap(~ Condition_Order) +
+    geom_text(data = pvals, aes(x = -Inf, y = Inf, label = p_label), hjust = -1.1, vjust = 2.4, size = 4, inherit.aes = FALSE) +
+    geom_text(data = r_values, aes(x = -Inf, y = Inf, label = r_label), hjust = -1.4, vjust = 4.1, size = 4, inherit.aes = FALSE) +
+    labs(title = paste("Regression of", quo_name(response_var), "on ASC_Score by Condition"),
+         x = quo_name(response_var),
+         y = "ASC_Score") +
+    theme_minimal()
+}
+
+# Execution:
+run_lm_by_condition(pqm, Q1Answer)
+run_lm_by_condition(pqm, Q2Answer)
+run_lm_by_condition(pqm, Q3Answer)
+
+```
+
+
+## Do Q1/Q2/Q3/ASC-Scores correlate with Drop in HRV (or Mean HR) from Baseline?
+
+```{r warning=FALSE, message=FALSE}
+# Process baseline data (remove outliers, calculate Mean HR and HRV)
+data_base_processed_no_outliers <- filtered_baseline %>%
+  group_by(Id) %>%
+  mutate(
+    # HRV (R-R) calculations
+    avg_rr = mean(`Clean R-R`, na.rm = TRUE),
+    lower_threshold_rr = 0.6 * avg_rr,
+    upper_threshold_rr = 1.4 * avg_rr,
+    is_outlier_rr = (`Clean R-R` < lower_threshold_rr) | (`Clean R-R` > upper_threshold_rr),
+    Clean_RR_Filtered = ifelse(is_outlier_rr, NA, `Clean R-R`),
+    
+    # HR calculations
+    avg_hr = mean(`Heart Rate`, na.rm = TRUE),
+    lower_threshold_hr = 0.6 * avg_hr,
+    upper_threshold_hr = 1.4 * avg_hr,
+    is_outlier_hr = (`Heart Rate` < lower_threshold_hr) | (`Heart Rate` > upper_threshold_hr),
+    Heart_Rate_Filtered = ifelse(is_outlier_hr, NA, `Heart Rate`)
+  ) %>%
+  ungroup()
+
+baseline_results <- data_base_processed_no_outliers %>%
+  filter(Id %in% 1:14) %>%
+  group_by(Id) %>%
+  arrange(Time) %>%
+  summarise(
+    mean_heart_rate = mean(`Heart Rate`, na.rm = TRUE),
+    
+    # Improved HRV calculation
+    heart_rate_variability = {
+      clean_rr <- na.omit(`Clean R-R`)
+      if (length(clean_rr) >= 2) {
+        sqrt(mean(diff(clean_rr)^2))  # RMSSD from consecutive non-NA values
+      } else {
+        NA_real_
+      }
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_heart_rate = ifelse(is.nan(mean_heart_rate), NA, mean_heart_rate)
+  )
+
+# Add baseline differences for mean heart rate and heart rate variability
+baseline_differences <- pqm %>%
+  mutate(Id = as.integer(Id)) %>%
+  left_join(
+    baseline_results %>% 
+      select(Id, baseline_mean_hr = mean_heart_rate, baseline_hrv = heart_rate_variability), 
+    by = "Id"
+  ) %>%
+  mutate(
+    baseline_difference_mean_hr = mean_heart_rate - baseline_mean_hr,
+    baseline_difference_hrv = heart_rate_variability - baseline_hrv
+  ) %>%
+  select(-baseline_mean_hr, -baseline_hrv)  # Remove intermediate columns
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineHRV_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineHRV_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_hrv, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q1$p, rmcorr_result_BaselineHRV_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q2$p, rmcorr_result_BaselineHRV_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_Q3$p, rmcorr_result_BaselineHRV_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_hrv, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "HRV Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineHRV_ASC$p, rmcorr_result_BaselineHRV_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineHRV_Q1)
+print(rmcorr_result_BaselineHRV_Q2)
+print(rmcorr_result_BaselineHRV_Q3)
+print(rmcorr_result_BaselineHRV_ASC)
+
+# Compute repeated measures correlation without combined mono/stereo scores (4 points per subject)
+rmcorr_result_BaselineMeanHR_Q1 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q2 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_Q3 <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanHR_ASC <- rmcorr(participant = Id, measure1 = baseline_difference_mean_hr, measure2 = ASC_Score, dataset = baseline_differences)
+
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q1$p, rmcorr_result_BaselineMeanHR_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q2$p, rmcorr_result_BaselineMeanHR_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_Q3$p, rmcorr_result_BaselineMeanHR_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = baseline_difference_mean_hr, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean HR Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanHR_ASC$p, rmcorr_result_BaselineMeanHR_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineMeanHR_Q1)
+print(rmcorr_result_BaselineMeanHR_Q2)
+print(rmcorr_result_BaselineMeanHR_Q3)
+print(rmcorr_result_BaselineMeanHR_ASC)
+
+```
+
+## Mean Pupil Size Difference from Baseline vs. Q1/Q2/Q3/ASC Answers
+
+```{r warning=FALSE, message=FALSE}
+# Define file paths
+file_paths <- list.files(path = "Study_01", pattern = "_DeviceData.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+device_combined <- bind_rows(lapply(file_paths, function(file) {
+  read_csv2(file, 
+            col_types = cols(Id = col_integer(), SegmentIndex = col_integer(), QuestionIndex = col_double(), LeftEyePupilSize = col_double(), RightEyePupilSize = col_double(), .default = col_guess()),
+            show_col_types = FALSE)
+}))
+
+condensed_device_combined <- device_combined %>%
+  mutate(
+    Condition = as.factor(VideoMode),
+    VideoMode = case_when(
+      grepl("Main_Stereo", VideoName) ~ "Stereo",
+      grepl("Main_Mono", VideoName) ~ "Mono",
+      TRUE ~ as.character(VideoMode)
+    ),
+    VideoName = as.factor(VideoName)
+  ) %>%
+  group_by(Id) %>%
+  mutate(Condition_Order = paste(VideoMode, Condition, sep = "_")) %>%
+  unnest_longer(Condition_Order)
+
+mean_pupil_size_df <- condensed_device_combined %>%
+  filter(Condition_Order != "NA_NA") %>%
+  group_by(Id, Condition_Order) %>%
+  summarise(
+    MeanAveragePupilSize = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Define file paths
+file_paths <- list.files(path = "Study_01", pattern = "_Baseline.csv", full.names = TRUE)
+
+# Import CSV files and combine them into a single data frame
+baseline_combined <- bind_rows(lapply(file_paths, read_csv2))
+
+mean_pupil_size_df_baseline <- baseline_combined %>%
+  group_by(Id) %>%
+  summarise(
+    MeanAveragePupilSizeBaseline = mean((LeftEyePupilSize + RightEyePupilSize) / 2, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+final_pupil_size_df <- mean_pupil_size_df %>%
+  left_join(mean_pupil_size_df_baseline %>% select(Id, MeanAveragePupilSizeBaseline), by = "Id") %>%
+  mutate(MeanPupilSize_Baseline_Diff = MeanAveragePupilSize - MeanAveragePupilSizeBaseline) %>%
+  select(Id, Condition_Order, MeanPupilSize_Baseline_Diff)
+
+baseline_differences <- baseline_differences %>%
+  left_join(final_pupil_size_df %>% select(Id, Condition_Order, MeanPupilSize_Baseline_Diff), by = c("Id", "Condition_Order"))
+
+# Compute repeated measures correlation without combined mono/stereo scores (7 points per subject)
+rmcorr_result_BaselineMeanPupil_Q1 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q1Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q2 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q2Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_Q3 <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = Q3Answer, dataset = baseline_differences)
+rmcorr_result_BaselineMeanPupil_ASC <- rmcorr(participant = Id, measure1 = MeanPupilSize_Baseline_Diff, measure2 = ASC_Score, dataset = baseline_differences)
+
+# Q1 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q1Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 1 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q1$p, rmcorr_result_BaselineMeanPupil_Q1$r),
+           family = "mono") 
+
+# Q2 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q2Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 2 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q2$p, rmcorr_result_BaselineMeanPupil_Q2$r),
+           family = "mono")  
+
+# Q3 vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = Q3Answer, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "Question 3 Answer",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_Q3$p, rmcorr_result_BaselineMeanPupil_Q3$r),
+           family = "mono") 
+
+# ASC vs HRV Difference from Baseline
+ggplot(baseline_differences, aes(x = ASC_Score, y = MeanPupilSize_Baseline_Diff, color = as.factor(Id), shape = VideoName)) +
+  geom_point(size = 2) +  # Scatterplot points
+  geom_smooth(aes(group = Id), method = "lm", se = FALSE, linetype = "solid") + 
+  labs(
+    x = "ASC Score",
+    y = "Mean Pupil Size Deviation from Baseline",
+    color = "Subject ID",
+    shape = "Video Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = -Inf, y = -Inf, hjust = -0.1, vjust = -1.2, size = 5, color = "black",
+           label = sprintf("p = %.3f\nr = %.3f", rmcorr_result_BaselineMeanPupil_ASC$p, rmcorr_result_BaselineMeanPupil_ASC$r),
+           family = "mono") 
+
+
+print(rmcorr_result_BaselineMeanPupil_Q1)
+print(rmcorr_result_BaselineMeanPupil_Q2)
+print(rmcorr_result_BaselineMeanPupil_Q3)
+print(rmcorr_result_BaselineMeanPupil_ASC)
+
+```
